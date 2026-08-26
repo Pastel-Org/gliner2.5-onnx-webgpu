@@ -223,13 +223,25 @@ export function decodeAssignedRecords({
       const nullLogit = assign[base];
       if (parsed[f].dtype === "list") {
         const hits = [];
+        const spans = [];
         for (let c = 0; c < C; c++) {
           if (!marg.pairValid[f * C + c]) continue;
           if (assign[base + 1 + c] <= nullLogit) continue;
+          const p = sigmoid(marg.pairLogits[f * C + c] / temp);
+          if (p < 0.5) continue;
           const s = Number(marg.pairIndices[f * C * 2 + c * 2]);
           const e = Number(marg.pairIndices[f * C * 2 + c * 2 + 1]);
-          const p = sigmoid(marg.pairLogits[f * C + c] / temp);
-          const m = mentionFromSpan(parsed[f].name, s, e, p, marg.words, marg.normalized);
+          spans.push({ s, e, p, c });
+        }
+        spans.sort((a, b) => b.p - a.p);
+        const kept = [];
+        for (const sp of spans) {
+          if (kept.some((k) => !(sp.e <= k.s || k.e <= sp.s))) continue;
+          kept.push(sp);
+        }
+        kept.sort((a, b) => a.s - b.s);
+        for (const sp of kept) {
+          const m = mentionFromSpan(parsed[f].name, sp.s, sp.e, sp.p, marg.words, marg.normalized);
           if (m) hits.push(toItem(m));
         }
         rec[parsed[f].name] = hits;

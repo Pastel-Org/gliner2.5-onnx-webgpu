@@ -596,7 +596,9 @@ export class GlinerBoundaryRuntime {
     const cs = marg.candidateStates.data;
     const qs = marg.queryStates.data;
     const temp = marg.pairTemperature || 1;
-    const anchor = Math.max(0, parsed.findIndex((p) => p.dtype === "str"));
+    let anchor = parsed.findIndex((p) => p.dtype === "list");
+    if (anchor < 0) anchor = parsed.findIndex((p) => p.dtype === "str");
+    if (anchor < 0) anchor = 0;
     const instSlots = [];
     for (let c = 0; c < C; c++) {
       if (!marg.pairValid[anchor * C + c]) continue;
