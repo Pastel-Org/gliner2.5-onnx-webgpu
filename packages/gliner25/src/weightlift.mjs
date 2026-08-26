@@ -109,14 +109,15 @@ export function glinerModel({
 
         let attrsSession = null;
         try {
-          const attrsUrl = hfFileUrl(meta.repo, "onnx/attrs.onnx") + "?v=6";
+          const attrsUrl = hfFileUrl(meta.repo, "onnx/attrs.onnx") + "?v=7";
           progress.dispatch({ type: "initiate", file: "onnx/attrs.onnx" });
           const attrsBytes = await downloadModel(attrsUrl);
           progress.dispatch({ type: "done", file: "onnx/attrs.onnx" });
           attrsSession = await ort.InferenceSession.create(attrsBytes.buffer, {
             executionProviders: providers,
           });
-        } catch {
+        } catch (err) {
+          console.warn("attrs.onnx not loaded", err);
           attrsSession = null;
         }
 

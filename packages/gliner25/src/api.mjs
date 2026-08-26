@@ -239,8 +239,11 @@ export class Gliner25 {
   async extract_with_attributes(text, entityLabels, attrLabels, { threshold = 0.5, parent = "entities" } = {}) {
     const entities = await this.rt.extract(text, entityLabels, { threshold, parent });
     if (this.rt.attrsSession && entities.length) {
-      const scored = await this.rt.scoreExplicitAttributes(text, entities, attrLabels);
-      return scored;
+      try {
+        return await this.rt.scoreExplicitAttributes(text, entities, attrLabels);
+      } catch (err) {
+        console.warn("scoreExplicitAttributes failed, overlay fallback", err);
+      }
     }
     const attrMarg = await this.rt.computeMarginals(text, attrLabels, { parent: "attributes" });
     return attachAttributesFromLattice(entities, attrMarg, attrLabels);
