@@ -16,16 +16,17 @@ Requires a browser with `navigator.gpu` (Chrome/Edge 113+, Safari 26+ tech previ
 
 ## What this is
 
-The `gliner2.5-{small,base,multi}-v1-onnx` exports are **boundary-architecture** ONNX graphs: the graph runs the DeBERTa encoder over packed `input_ids` and emits per-query boundary marginals `start_logits` / `end_logits` `[B, Q, L+1]`. Everything else — word splitting, entity-schema packing, subword routing, span decode — is host-side and implemented in this repo (~330 lines of dependency-free JavaScript, clean-room reimplemented from the [fastino-ai/GLiNER2](https://github.com/fastino-ai/GLiNER2) Apache-2.0 reference):
+The `gliner2.5-{small,base,multi}-v1-onnx` exports are **boundary-architecture** ONNX graphs that include the full candidate path: the DeBERTa encoder, the sparse proposer, the shared document candidate pool, and the **pair reranker**. The graph emits boundary marginals `start_logits` / `end_logits` `[B, Q, L+1]` plus reranked candidates `pair_indices [B,Q,C,2]`, `pair_logits [B,Q,C]`, `pair_valid [B,Q,C]` (C = 192). Everything else — word splitting, entity-schema packing, subword routing, span decode — is host-side and implemented in this repo (~430 lines of dependency-free JavaScript, clean-room reimplemented from the [fastino-ai/GLiNER2](https://github.com/fastino-ai/GLiNER2) Apache-2.0 reference):
 
 ```text
 words ──▶ schema pack: ( [P] entities ( [E] label … ) ) [SEP_TEXT] words
       ──▶ ONNX (int64 feeds, first-subword routing, [E]-marker queries)
-      ──▶ decode: sigmoid marginals → threshold → interval-scheduling spans
+      ──▶ decode: sigmoid(pair_logits / pair_temperature) → threshold
+              → dedupe (start,end) → interval-scheduling spans
       ──▶ char-offset entities {label, text, start, end, score}
 ```
 
-Verified: reproduces the upstream model-card example with exact character offsets (Apple [0,5), "Tim Cook" [10,18), "iPhone 15" [29,38), Cupertino [42,51)).
+Verified: JavaScript decode of these graphs matches the Python `AutoExtractor` pipeline's confidences to 4 decimals on all three checkpoints (recorded per model in each HF model card).
 
 ## Files
 
@@ -65,9 +66,10 @@ const entities = await rt.extract(
 
 ## Notes and honest caveats
 
-- **Decode path**: these exports expose boundary marginals only — the upstream pair reranker is not part of the graph. Span score here is `min(sigmoid(start), sigmoid(end))`, a marginal proxy. Raise the threshold (0.6–0.7) for better precision; that is what our CPU baseline measurements recommend.
-- **Baseline numbers** (synthetic 26-sample suite, 8 labels, EN/FR/DE): span-F1 0.86 (small), 0.92 (base), 0.92 (multi) at tuned thresholds, recall 0.94–0.98. Measured with the Node/CPU path over the same `src` protocol code.
-- **WebGPU caveat**: int64 input tensors are required by the graph. Some browsers lack int64 support in WebGPU kernels; the demo falls back to WASM when no WebGPU adapter is present, matching the model card's guidance.
+- **Decode path**: revision 2 of the exports contains the pair reranker, so span scores are the same reranked logits the Python `AutoExtractor` pipeline produces (4-decimal parity verified). The first revision exposed boundary marginals only and required a `min(sigmoid(start), sigmoid(end))` proxy; that cost precision at low thresholds. With v2, the threshold curve is flat: 0.3–0.7 all within ~0.02 F1 of peak.
+- **Eval numbers** (synthetic 26-sample suite, 8 labels, EN/FR/DE, 103 gold spans, CPU): peak partial span-F1 0.86 (small), 0.92 (base), 0.91 (multi). Base is the strongest overall: 0.92 F1 at recall 0.97. Precision at threshold 0.3 improved from 0.45 to 0.77 (small) going from the marginal proxy to the reranker.
+- **Candidate pool recall trade-off**: spans must survive a fixed 192-candidate pool before reranking, instead of exhaustive marginal enumeration. Recall at aggressive thresholds dips 3–6 points vs the v1 exhaustive decode; peak-F1 recall is unchanged.
+- **WebGPU caveat**: int64 input tensors are required by the graph. Some browsers lack int64 support in WebGPU kernels; the demo falls back to WASM when no WebGPU adapter is present.
 - Tokenizer files come from the model repos via transformers.js 4.2.0 (pinned), ONNX Runtime Web 1.26.0 (pinned).
 
 ## Credits & license

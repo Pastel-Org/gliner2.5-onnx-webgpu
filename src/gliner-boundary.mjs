@@ -227,19 +227,67 @@ export function decodeEntities({ startLogits, endLogits, wordCount, labels, word
 }
 
 /**
+ * Decode v2 (pair-reranker) outputs into character-offset entities.
+ * Dedupes candidate slots by (start,end) — the topk export path may emit
+ * duplicates — then thresholds sigmoid(pair_logits / pairTemperature) and
+ * resolves overlaps per label.
+ */
+export function decodeEntitiesV2({
+  pairIndices, pairLogits, pairValid, candidateCount,
+  labels, wordOffsets, text, threshold = 0.5, pairTemperature = 1.0,
+}) {
+  const Q = labels.length;
+  const C = candidateCount;
+  const entities = [];
+  for (let q = 0; q < Q; q++) {
+    const seen = new Map();
+    for (let c = 0; c < C; c++) {
+      if (!pairValid[q * C + c]) continue;
+      const s = Number(pairIndices[q * C * 2 + c * 2]);
+      const e = Number(pairIndices[q * C * 2 + c * 2 + 1]);
+      const p = sigmoid(pairLogits[q * C + c] / pairTemperature);
+      const key = `${s},${e}`;
+      if (!seen.has(key) || p > seen.get(key).p) seen.set(key, { s, e, p });
+    }
+    const spans = [...seen.values()]
+      .filter(({ p }) => p >= threshold)
+      .map(({ s, e, p }) => ({ start: s, end: e, score: p }));
+    for (const { start, end, score } of resolveOverlapsFlat(spans)) {
+      if (start >= end || end > wordOffsets.length) continue;
+      const charStart = wordOffsets[start].start;
+      const charEnd = wordOffsets[end - 1].end;
+      const surface = text.slice(charStart, charEnd);
+      const lead = surface.length - surface.trimStart().length;
+      const stripped = surface.trim();
+      if (!stripped) continue;
+      entities.push({
+        label: labels[q],
+        text: stripped,
+        start: charStart + lead,
+        end: charStart + lead + stripped.length,
+        score,
+      });
+    }
+  }
+  return entities;
+}
+
+/**
  * GLiNER boundary runtime over an existing ORT-web session + tokenizer.
  *
  * @param {object} opts
  * @param {import("onnxruntime-web")} opts.ort        the ort module
  * @param {import("onnxruntime-web").InferenceSession} opts.session
  * @param {(token: string) => number[]} opts.tokenize subword ids for one token
+ * @param {number} [opts.pairTemperature] v2 graphs: pair logit temperature (1.0 in current exports)
  */
 export class GlinerBoundaryRuntime {
-  constructor({ ort, session, tokenize }) {
+  constructor({ ort, session, tokenize, pairTemperature = 1.0 }) {
     if (!ort || !session || !tokenize) throw new Error("ort, session and tokenize are required");
     this.ort = ort;
     this.session = session;
     this.tokenize = tokenize;
+    this.pairTemperature = pairTemperature;
     this._cache = new Map();
   }
 
@@ -289,6 +337,21 @@ export class GlinerBoundaryRuntime {
     };
 
     const results = await this.session.run(feeds);
+    if (results.pair_logits) {
+      // v2 graph: proposer + shared pool + pair reranker ran in-graph.
+      return {
+        normalized,
+        words,
+        labels,
+        startLogits: results.start_logits.data,
+        endLogits: results.end_logits.data,
+        pairIndices: results.pair_indices.data,
+        pairLogits: results.pair_logits.data,
+        pairValid: results.pair_valid.data,
+        candidateCount: results.pair_logits.dims[2],
+        pairTemperature: this.pairTemperature,
+      };
+    }
     return {
       normalized,
       words,
@@ -299,12 +362,27 @@ export class GlinerBoundaryRuntime {
   }
 
   /**
-   * Extract entities.
+   * Extract entities. Auto-detects v2 graphs (pair outputs present) and
+   * decodes from reranked candidates; v1 graphs fall back to the marginal
+   * proxy decode.
    * @returns {Promise<Array<{label:string,text:string,start:number,end:number,score:number}>>}
    */
   async extract(text, labels, { threshold = 0.5, maxWords = 3800 } = {}) {
     const marg = await this.computeMarginals(text, labels, { maxWords });
     if (!marg.startLogits) return [];
+    if (marg.pairLogits) {
+      return decodeEntitiesV2({
+        pairIndices: marg.pairIndices,
+        pairLogits: marg.pairLogits,
+        pairValid: marg.pairValid,
+        candidateCount: marg.candidateCount,
+        labels: marg.labels,
+        wordOffsets: marg.words,
+        text: marg.normalized,
+        threshold,
+        pairTemperature: marg.pairTemperature,
+      });
+    }
     return decodeEntities({
       startLogits: marg.startLogits,
       endLogits: marg.endLogits,
@@ -313,6 +391,28 @@ export class GlinerBoundaryRuntime {
       wordOffsets: marg.words,
       text: marg.normalized,
       threshold,
+    });
+  }
+
+  /**
+   * Extract entities from a v2 graph explicitly. Throws if the session does
+   * not expose pair outputs (use extract() for auto-detection).
+   */
+  async extractV2(text, labels, { threshold = 0.5, maxWords = 3800 } = {}) {
+    const marg = await this.computeMarginals(text, labels, { maxWords });
+    if (!marg.pairLogits) {
+      throw new Error("session is not a v2 export (no pair_logits output)");
+    }
+    return decodeEntitiesV2({
+      pairIndices: marg.pairIndices,
+      pairLogits: marg.pairLogits,
+      pairValid: marg.pairValid,
+      candidateCount: marg.candidateCount,
+      labels: marg.labels,
+      wordOffsets: marg.words,
+      text: marg.normalized,
+      threshold,
+      pairTemperature: marg.pairTemperature,
     });
   }
 }
