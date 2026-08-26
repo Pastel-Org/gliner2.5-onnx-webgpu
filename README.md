@@ -34,9 +34,13 @@ Verified: JavaScript decode of these graphs matches the Python `AutoExtractor` p
 
 ## Files
 
-- `index.html` — the runnable demo (vanilla JS, CDN imports, Fastino README/tutorial/blog examples)
-- `src/gliner-boundary.mjs` — packing, routing, v2 decode, long-document chunking
-- `src/demo-presets.mjs` — example texts and labels
+- `index.html` — demo (weightlift ModelManager + Fastino templates)
+- `src/gliner-boundary.mjs` — packing, v2 decode, long-document chunking
+- `src/api.mjs` — AutoExtractor-shaped JS API (`extract_entities`, `extract_json`, …)
+- `src/weightlift.mjs` — `glinerModel()` weightlift adapter
+- `src/demo-presets.mjs` — Fastino README/tutorial/blog examples
+- `PROGRAM.md` — fused-graph + JS-decode + weightlift plan
+- `export_v3_cls.py` — classifier + cached `text_states` (not uploaded yet)
 
 ## Models
 
