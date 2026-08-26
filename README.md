@@ -1,8 +1,10 @@
 # gliner2.5-onnx-webgpu
 
+**Live demo: https://gliner25-onnx-webgpu.pages.dev**
+
 Zero-shot named-entity recognition with [GLiNER2.5](https://huggingface.co/collections/nicolasembleton/gliner25) (boundary architecture), fully in the browser via ONNX Runtime Web — WebGPU when available, WASM fallback. No server, no keys, no build step.
 
-**Open the demo: serve this directory and load `index.html`.** Nothing is bundled:
+To run locally instead, serve this directory and load `index.html`. Nothing is bundled:
 
 ```bash
 cd gliner-2.5
