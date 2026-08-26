@@ -27,5 +27,7 @@ Three instances. Dosage and frequency empty on all. Names are long/low-score exc
 
 ## attr-product
 
-One product: “iPhone camera” 0.903 with sentiment **negative 0.592**.
-JS now runs `attrs.onnx` (`score_explicit_spans`, dynamo, pad 512/8/16). Overlay is the fallback only.
+One product: “iPhone camera” 0.903 with sentiment **negative 0.592** (softmax).
+NER-only on the same text keeps “iPhone” 0.933. The joint `[E]` pack
+(product + positive/negative/neutral) is what changes the span.
+JS now packs the same way and scores with `attrs.onnx`.

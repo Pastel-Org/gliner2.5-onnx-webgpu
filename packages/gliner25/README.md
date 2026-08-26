@@ -49,7 +49,7 @@ await gliner.extract_relations(text, { works_for: { head: ["person"], tail: ["or
 | `extract_relations` (JointIE beam in JS) | v4 `heads.onnx` |
 | `extract_json(..., { records: true })` | v5 `candidate_states` + `records.onnx` |
 | `classify_text(..., { implies, excludes })` | v3 logits + JS beam |
-| `extract_with_attributes` | v5 `attrs.onnx` (`score_explicit_spans`, pad 512/8/16). Overlay lookup if the graph is missing |
+| `extract_with_attributes` | joint `[E]` pack of entity + attribute labels, then `attrs.onnx` softmax. 512-word local window |
 
 Host-side decode, overlap resolution, long-document chunking, and JSON
 field typing are JavaScript here; the ONNX graph does neural scoring only.

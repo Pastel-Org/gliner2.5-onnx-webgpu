@@ -173,6 +173,42 @@ export function sigmoid(x) {
   return e / (1 + e);
 }
 
+/** Numerically stable softmax. Matches Python single-label AttributeGroup. */
+export function softmax(xs) {
+  if (!xs.length) return [];
+  let m = xs[0];
+  for (let i = 1; i < xs.length; i++) if (xs[i] > m) m = xs[i];
+  const exps = new Float64Array(xs.length);
+  let sum = 0;
+  for (let i = 0; i < xs.length; i++) {
+    const e = Math.exp(xs[i] - m);
+    exps[i] = e;
+    sum += e;
+  }
+  return Array.from(exps, (e) => e / sum);
+}
+
+/** Crop word states to a pad-length window around the given spans. */
+export function cropWordStates(textStates, entities, pad) {
+  const L = textStates.dims[1];
+  const H = textStates.dims[2];
+  const data = textStates.data;
+  const ts = new Float32Array(pad * H);
+  const mask = new Float32Array(pad);
+  if (L <= pad) {
+    ts.set(data.subarray(0, L * H));
+    mask.fill(1, 0, L);
+    return { origin: 0, ts, mask };
+  }
+  const minS = Math.min(...entities.map((e) => e.wordStart ?? 0));
+  const maxE = Math.max(...entities.map((e) => e.wordEnd ?? 1));
+  const mid = Math.floor((minS + maxE) / 2);
+  const origin = Math.max(0, Math.min(mid - Math.floor(pad / 2), L - pad));
+  ts.set(data.subarray(origin * H, (origin + pad) * H));
+  mask.fill(1);
+  return { origin, ts, mask };
+}
+
 /**
  * Weighted interval scheduling: max-total-score non-overlapping subset.
  * Spans use half-open word indices [start, end). Flat overlap policy.
@@ -545,54 +581,77 @@ export class GlinerBoundaryRuntime {
     return pairs.map((p, i) => ({ ...p, logit: logits[i], score: sigmoid(logits[i]) }));
   }
 
-  async scoreExplicitAttributes(text, entities, attrLabels) {
-    if (!this.attrsSession) return entities;
-    const marg = await this.computeMarginals(text, attrLabels, { parent: "attributes" });
+  async scoreExplicitAttributes(text, entities, attrLabels, {
+    marg = null,
+    queryOffset = 0,
+    multiLabel = false,
+  } = {}) {
+    if (!this.attrsSession || !entities.length) return entities;
+    if (!marg) {
+      marg = await this.computeMarginals(text, attrLabels, { parent: "attributes" });
+      queryOffset = 0;
+    }
     if (!marg.queryStates || !marg.textStates) return entities;
-    // Dynamo graph is traced at these pads (legacy tracer broke unsqueeze).
+    // Dynamo graph is traced at these pads. Longer documents crop a local
+    // window around the spans — 512 is context, not a document cap.
     const PAD_L = 512;
     const PAD_Q = 8;
     const PAD_C = 16;
-    const L = marg.textStates.dims[1];
     const H = marg.textStates.dims[2];
-    const Q = Math.min(attrLabels.length, PAD_Q);
-    const C = Math.min(Math.max(entities.length, 1), PAD_C);
-    const ts = new Float32Array(PAD_L * H);
-    ts.set(marg.textStates.data.subarray(0, Math.min(L, PAD_L) * H));
+    const Qfull = marg.queryStates.dims[1];
+    const Q = Math.min(attrLabels.length, PAD_Q, Math.max(0, Qfull - queryOffset));
+    if (Q === 0) return entities;
     const qs = new Float32Array(PAD_Q * H);
-    qs.set(marg.queryStates.data.subarray(0, Q * H));
-    const mask = new Float32Array(PAD_L);
-    mask.fill(1, 0, Math.min(L, PAD_L));
+    const srcQ = marg.queryStates.data;
+    for (let q = 0; q < Q; q++) {
+      const src = (queryOffset + q) * H;
+      qs.set(srcQ.subarray(src, src + H), q * H);
+    }
     const qmask = new Float32Array(PAD_Q);
     qmask.fill(1, 0, Q);
-    const indices = new BigInt64Array(PAD_Q * PAD_C * 2);
-    for (let q = 0; q < PAD_Q; q++) {
-      for (let c = 0; c < PAD_C; c++) {
-        const e = entities[Math.min(c, Math.max(entities.length - 1, 0))] || { wordStart: 0, wordEnd: 1 };
-        const off = (q * PAD_C + c) * 2;
-        indices[off] = BigInt(Math.min(e.wordStart ?? 0, PAD_L - 1));
-        indices[off + 1] = BigInt(Math.min(Math.max(e.wordEnd ?? 1, 1), PAD_L));
+
+    for (let batchStart = 0; batchStart < entities.length; batchStart += PAD_C) {
+      const batch = entities.slice(batchStart, batchStart + PAD_C);
+      const { origin, ts, mask } = cropWordStates(marg.textStates, batch, PAD_L);
+      const indices = new BigInt64Array(PAD_Q * PAD_C * 2);
+      for (let q = 0; q < PAD_Q; q++) {
+        for (let c = 0; c < PAD_C; c++) {
+          const e = batch[Math.min(c, batch.length - 1)];
+          const off = (q * PAD_C + c) * 2;
+          const s = Math.max(0, Math.min((e.wordStart ?? 0) - origin, PAD_L - 1));
+          const en = Math.max(s + 1, Math.min((e.wordEnd ?? 1) - origin, PAD_L));
+          indices[off] = BigInt(s);
+          indices[off + 1] = BigInt(en);
+        }
       }
-    }
-    const feeds = {
-      text_states: new this.ort.Tensor("float32", ts, [1, PAD_L, H]),
-      text_word_mask: new this.ort.Tensor("float32", mask, [1, PAD_L]),
-      query_states: new this.ort.Tensor("float32", qs, [1, PAD_Q, H]),
-      query_marker_mask: new this.ort.Tensor("float32", qmask, [1, PAD_Q]),
-      span_indices: new this.ort.Tensor("int64", indices, [1, PAD_Q, PAD_C, 2]),
-    };
-    const out = await this.attrsSession.run(feeds);
-    const logits = out.attr_logits.data;
-    for (let c = 0; c < entities.length && c < PAD_C; c++) {
-      let best = 0;
-      let bestV = -1e9;
-      for (let q = 0; q < Q; q++) {
-        const v = logits[q * PAD_C + c];
-        if (v > bestV) { bestV = v; best = q; }
+      const out = await this.attrsSession.run({
+        text_states: new this.ort.Tensor("float32", ts, [1, PAD_L, H]),
+        text_word_mask: new this.ort.Tensor("float32", mask, [1, PAD_L]),
+        query_states: new this.ort.Tensor("float32", qs, [1, PAD_Q, H]),
+        query_marker_mask: new this.ort.Tensor("float32", qmask, [1, PAD_Q]),
+        span_indices: new this.ort.Tensor("int64", indices, [1, PAD_Q, PAD_C, 2]),
+      });
+      const logits = out.attr_logits.data;
+      for (let c = 0; c < batch.length; c++) {
+        const col = [];
+        for (let q = 0; q < Q; q++) col.push(logits[q * PAD_C + c]);
+        if (multiLabel) {
+          const probs = col.map(sigmoid);
+          let best = 0;
+          for (let q = 1; q < Q; q++) if (probs[q] > probs[best]) best = q;
+          batch[c].attribute = attrLabels[best];
+          batch[c].attributeScore = probs[best];
+          batch[c].attributeScores = Object.fromEntries(attrLabels.slice(0, Q).map((l, i) => [l, probs[i]]));
+        } else {
+          const probs = softmax(col);
+          let best = 0;
+          for (let q = 1; q < Q; q++) if (probs[q] > probs[best]) best = q;
+          batch[c].attribute = attrLabels[best];
+          batch[c].attributeScore = probs[best];
+          batch[c].attributeScores = Object.fromEntries(attrLabels.slice(0, Q).map((l, i) => [l, probs[i]]));
+        }
+        batch[c]._attrsPath = "score_explicit_spans";
       }
-      entities[c].attribute = attrLabels[best];
-      entities[c].attributeScore = sigmoid(bestV);
-      entities[c]._attrsPath = "score_explicit_spans";
     }
     return entities;
   }

@@ -236,11 +236,40 @@ export class Gliner25 {
     return out;
   }
 
-  async extract_with_attributes(text, entityLabels, attrLabels, { threshold = 0.5, parent = "entities" } = {}) {
-    const entities = await this.rt.extract(text, entityLabels, { threshold, parent });
+  async extract_with_attributes(text, entityLabels, attrLabels, { threshold = 0.5, parent = "entities", multiLabel = false } = {}) {
+    // Python packs entity labels and attribute labels as one [E] block.
+    // A product-only pass keeps "iPhone"; the joint pack keeps "iPhone camera".
+    const packed = [...entityLabels, ...attrLabels];
+    const marg = await this.rt.computeMarginals(text, packed, { parent });
+    let entities = [];
+    if (marg.pairLogits) {
+      entities = decodeEntitiesV2({
+        pairIndices: marg.pairIndices,
+        pairLogits: marg.pairLogits,
+        pairValid: marg.pairValid,
+        candidateCount: marg.candidateCount,
+        labels: entityLabels,
+        wordOffsets: marg.words,
+        text: marg.normalized,
+        threshold,
+        pairTemperature: marg.pairTemperature,
+      });
+    } else if (marg.startLogits) {
+      entities = decodeEntities({
+        startLogits: marg.startLogits,
+        endLogits: marg.endLogits,
+        wordCount: marg.words.length,
+        labels: entityLabels,
+        wordOffsets: marg.words,
+        text: marg.normalized,
+        threshold,
+      });
+    }
     if (this.rt.attrsSession && entities.length) {
       try {
-        return await this.rt.scoreExplicitAttributes(text, entities, attrLabels);
+        return await this.rt.scoreExplicitAttributes(text, entities, attrLabels, {
+          marg, queryOffset: entityLabels.length, multiLabel,
+        });
       } catch (err) {
         console.warn("scoreExplicitAttributes failed, overlay fallback", err);
       }

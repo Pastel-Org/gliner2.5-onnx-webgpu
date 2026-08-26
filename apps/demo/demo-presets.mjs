@@ -53,7 +53,7 @@ export const GROUPS = [
   {
     id: "Attributes",
     title: "Span attributes",
-    blurb: "Python scores attributes on kept spans. attrs.onnx is that path (dynamo export, pad 512/8/16). Overlay lookup only if the graph is missing.",
+    blurb: "Python packs product + attribute labels in one [E] pass, then softmax on score_explicit_spans. A product-only pass keeps a shorter span.",
   },
 ];
 
@@ -381,7 +381,7 @@ export const PRESETS = [
     view: "attributes",
     labels: "product",
     attributeLabels: "positive, negative, neutral",
-    note: "Entities first, then attrs.onnx scores those (start,end) against attribute queries. Pad 512/8/16.",
+    note: "Joint [E] pack (product + sentiment labels), then attrs.onnx softmax. 512-word local window, not a document cap.",
     text: "The iPhone camera is stunning but the battery life is disappointing, while the speakers are fine.",
   },
 ];
