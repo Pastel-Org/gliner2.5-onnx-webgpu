@@ -15,7 +15,7 @@
     line-height: var(--pastel-leading-normal, 1.55);
     -webkit-font-smoothing: antialiased;
   }
-  main { max-width: 54rem; margin: 0 auto; padding: var(--pastel-space-12) var(--pastel-space-5) var(--pastel-space-16); }
+  main { max-width: 72rem; margin: 0 auto; padding: var(--pastel-space-12) var(--pastel-space-5) var(--pastel-space-16); }
   h1 { font-size: 1.45rem; margin: 0 0 .25rem; letter-spacing: var(--pastel-tracking-tight); }
   h1 span { color: var(--pastel-text-muted); font-weight: 400; }
   .sub { color: var(--pastel-text-muted); margin: 0 0 var(--pastel-space-6); font-size: .92rem; }
@@ -101,21 +101,56 @@
   pre { background: var(--pastel-bg); border: 1px solid var(--pastel-border); border-radius: var(--pastel-radius-md); padding: .8rem; overflow-x: auto; font-size: .78rem; font-family: var(--pastel-font-mono); }
   footer { color: var(--pastel-text-muted); font-size: .8rem; margin-top: var(--pastel-space-8); }
   footer a { color: var(--pastel-accent); text-decoration: none; }
-  .chips { display: flex; flex-wrap: wrap; gap: var(--pastel-space-1); }
-  .ex-groups { display: flex; flex-direction: column; gap: var(--pastel-space-5); }
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem);
+    gap: var(--pastel-space-4);
+    align-items: stretch;
+    margin-bottom: var(--pastel-space-4);
+  }
+  .workspace > .card { margin-bottom: 0; }
+  .stage {
+    min-width: 0;
+    transition: box-shadow var(--pastel-duration-normal) var(--pastel-easing), background var(--pastel-duration-normal) var(--pastel-easing);
+  }
+  .now {
+    font-size: .82rem;
+    color: var(--pastel-accent-dim);
+    font-weight: 600;
+    margin: 0 0 var(--pastel-space-4);
+    min-height: 1.2em;
+  }
+  .stage.flash {
+    animation: stage-flash 520ms var(--pastel-easing);
+  }
+  .stage.flash #text,
+  .stage.flash #labels {
+    border-color: var(--pastel-accent);
+    box-shadow: var(--pastel-shadow-glow);
+  }
+  @keyframes stage-flash {
+    0% { background: oklch(0.655 0.135 45 / 0.10); box-shadow: 0 0 0 3px oklch(0.655 0.135 45 / 0.28); }
+    100% { background: var(--pastel-surface); box-shadow: var(--pastel-shadow-sm); }
+  }
+  .samples { display: flex; flex-direction: column; min-height: 0; }
+  .ex-scroll {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    max-height: min(70vh, 38rem);
+    padding-right: .2rem;
+    margin-top: var(--pastel-space-2);
+  }
+  .chips { display: flex; flex-direction: column; gap: 0.28rem; }
+  .ex-groups { display: flex; flex-direction: column; gap: var(--pastel-space-4); }
   .ex-group h3 {
-    margin: 0 0 .2rem;
-    font-size: .78rem;
+    margin: 0 0 .35rem;
+    font-size: .72rem;
     font-weight: 600;
     letter-spacing: .04em;
     text-transform: uppercase;
     color: var(--pastel-text-muted);
   }
-  .ex-group .blurb {
-    margin: 0 0 .45rem;
-    font-size: .82rem;
-    color: var(--pastel-text-secondary);
-  }
+  .ex-group .blurb { display: none; }
   .chip {
     font: inherit;
     font-size: .8rem;
@@ -123,13 +158,16 @@
     color: var(--pastel-text);
     background: var(--pastel-bg);
     border: 1px solid var(--pastel-border);
-    border-radius: var(--pastel-radius-full);
-    padding: .28rem .7rem;
+    border-radius: var(--pastel-radius-md);
+    padding: .4rem .65rem;
     cursor: pointer;
-    display: inline-flex;
+    display: flex;
+    width: 100%;
     align-items: baseline;
+    justify-content: space-between;
     gap: .35rem;
-    transition: border-color var(--pastel-duration-fast) var(--pastel-easing), color var(--pastel-duration-fast) var(--pastel-easing);
+    text-align: left;
+    transition: border-color var(--pastel-duration-fast) var(--pastel-easing), background var(--pastel-duration-fast) var(--pastel-easing), color var(--pastel-duration-fast) var(--pastel-easing);
   }
   .chip .src {
     font-size: .62rem;
@@ -137,10 +175,15 @@
     letter-spacing: .04em;
     text-transform: uppercase;
     color: var(--pastel-text-muted);
+    flex: 0 0 auto;
   }
   .chip:hover { border-color: var(--pastel-accent); }
   .chip.on { background: oklch(0.655 0.135 45 / 0.12); border-color: var(--pastel-accent); color: var(--pastel-accent-dim); }
   .chip.on .src { color: var(--pastel-accent-dim); }
+  @media (max-width: 52rem) {
+    .workspace { grid-template-columns: 1fr; }
+    .ex-scroll { max-height: 16rem; }
+  }
   .note {
     font-size: .85rem;
     color: var(--pastel-text-muted);
@@ -218,40 +261,41 @@
     </div>
   </details>
 
-  <div class="card">
-    <label>Examples</label>
-    <div class="ex-groups" id="chips"></div>
-    <p class="note" id="preset-note" hidden></p>
-  </div>
-
-  <div class="card">
-    <div class="controls">
-      <div>
-        <label for="model">Model</label>
-        <select id="model">
-          <option value="small" selected>small · 74M · English · 288 MB</option>
-          <option value="base">base · 194M · English · 746 MB</option>
-          <option value="multi">multi · 287M · multilingual · 1.12 GB</option>
-        </select>
+  <div class="workspace">
+    <div class="card stage" id="stage">
+      <div class="now" id="now">Named entities · Apple / Cook</div>
+      <div class="controls">
+        <div>
+          <label for="model">Model</label>
+          <select id="model">
+            <option value="small" selected>small · 74M · English · 288 MB</option>
+            <option value="base">base · 194M · English · 746 MB</option>
+            <option value="multi">multi · 287M · multilingual · 1.12 GB</option>
+          </select>
+        </div>
+        <div>
+          <label for="threshold">Threshold</label>
+          <input type="text" id="threshold" value="0.5" inputmode="decimal" />
+        </div>
+        <div class="span-all">
+          <label for="labels">Labels</label>
+          <input type="text" id="labels" value="person, organization, location, product" />
+        </div>
       </div>
-      <div>
-        <label for="threshold">Threshold</label>
-        <input type="text" id="threshold" value="0.5" inputmode="decimal" />
+      <label for="text" style="margin-top: var(--pastel-space-4);">Text</label>
+      <textarea id="text">Apple CEO Tim Cook announced iPhone 15 in Cupertino yesterday.</textarea>
+      <div class="row" style="margin-top: .8rem;">
+        <button id="run">Load model &amp; extract</button>
       </div>
-      <div class="span-all">
-        <label for="labels">Labels</label>
-        <input type="text" id="labels" value="person, organization, location, product" />
-      </div>
+      <div class="status" id="status">WebGPU: checking…</div>
+      <p class="note" id="preset-note" hidden></p>
     </div>
-  </div>
-
-  <div class="card">
-    <label for="text">Text</label>
-    <textarea id="text">Apple CEO Tim Cook announced iPhone 15 in Cupertino yesterday.</textarea>
-    <div class="row" style="margin-top: .8rem;">
-      <button id="run">Load model &amp; extract</button>
-    </div>
-    <div class="status" id="status">WebGPU: checking…</div>
+    <aside class="card samples">
+      <label>Samples</label>
+      <div class="ex-scroll">
+        <div class="ex-groups" id="chips"></div>
+      </div>
+    </aside>
   </div>
 
   <div class="card">
@@ -303,7 +347,7 @@
     model: $("model"), threshold: $("threshold"), labels: $("labels"),
     text: $("text"), run: $("run"), status: $("status"), output: $("output"),
     legend: $("legend"), stats: $("stats"), raw: $("raw"), extra: $("extra"),
-    chips: $("chips"), note: $("preset-note"),
+    chips: $("chips"), note: $("preset-note"), now: $("now"), stage: $("stage"),
   };
 
   const deviceLabel = { value: "?" };
@@ -318,11 +362,13 @@
     return s.split(",").map((x) => x.trim()).filter(Boolean);
   }
 
-  function applyPreset(p) {
+  function applyPreset(p, { flash = true } = {}) {
     activePreset = p;
     el.text.value = p.text;
     el.labels.value = p.labels;
     if (p.suggestModel) el.model.value = p.suggestModel;
+    const group = GROUPS.find((g) => g.id === p.group);
+    el.now.textContent = `${group?.title || p.group} · ${p.title}`;
     for (const b of el.chips.querySelectorAll(".chip")) {
       b.classList.toggle("on", b.dataset.id === p.id);
     }
@@ -332,6 +378,11 @@
     } else {
       el.note.hidden = true;
     }
+    if (flash && el.stage) {
+      el.stage.classList.remove("flash");
+      void el.stage.offsetWidth;
+      el.stage.classList.add("flash");
+    }
   }
 
   const groups = GROUPS;
@@ -340,9 +391,6 @@
     section.className = "ex-group";
     const h = document.createElement("h3");
     h.textContent = g.title;
-    const blurb = document.createElement("p");
-    blurb.className = "blurb";
-    blurb.textContent = g.blurb;
     const row = document.createElement("div");
     row.className = "chips";
     for (const p of PRESETS.filter((x) => x.group === g.id)) {
@@ -360,7 +408,7 @@
       b.addEventListener("click", () => applyPreset(p));
       row.appendChild(b);
     }
-    section.append(h, blurb, row);
+    section.append(h, row);
     el.chips.appendChild(section);
   }
 
