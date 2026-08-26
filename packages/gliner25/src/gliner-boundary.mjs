@@ -361,9 +361,10 @@ export class GlinerBoundaryRuntime {
       : buildEntitiesSchemaTokens(labels, { parent, descriptions });
     if (relations && schemaKind !== "classification") {
       for (const [relType, spec] of Object.entries(relations)) {
-        schemaTokens = schemaTokens.concat(buildRelationSchemaTokens(relType, {
-          description: spec.description,
-        }));
+        schemaTokens = schemaTokens.concat(
+          ["[SEP_STRUCT]"],
+          buildRelationSchemaTokens(relType, { description: spec.description }),
+        );
       }
     }
     const { inputIds, textWordFirstPositions, queryMarkerPositions, clsMarkerPositions, relMarkerPositions } = packInput(

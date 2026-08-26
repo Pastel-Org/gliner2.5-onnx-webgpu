@@ -214,34 +214,11 @@ export class Gliner25 {
     const entityLabels = labels || [...new Set(
       Object.values(types).flatMap((s) => [...(s.head || s.heads || []), ...(s.tail || s.tails || [])]),
     )];
+    const entities = await this.rt.extract(text, entityLabels, { threshold });
     const marg = await this.rt.computeMarginals(text, entityLabels, { relations: types });
-    let entities;
-    if (marg.pairLogits) {
-      entities = decodeEntitiesV2({
-        pairIndices: marg.pairIndices,
-        pairLogits: marg.pairLogits,
-        pairValid: marg.pairValid,
-        candidateCount: marg.candidateCount,
-        labels: marg.labels,
-        wordOffsets: marg.words,
-        text: marg.normalized,
-        threshold,
-        pairTemperature: marg.pairTemperature,
-      });
-    } else {
-      entities = decodeEntities({
-        startLogits: marg.startLogits,
-        endLogits: marg.endLogits,
-        wordCount: marg.words.length,
-        labels: marg.labels,
-        wordOffsets: marg.words,
-        text: marg.normalized,
-        threshold,
-      });
-    }
     const pairs = proposeRelationPairs(entities, types);
     const scored = await this.rt.scoreRelations(marg, pairs);
-    const joint = beamSearchRelations(entities, scored, { threshold });
+    const joint = beamSearchRelations(entities, scored, { threshold: Math.min(0.25, threshold) });
     return {
       entities: toEntityMap(entities, { includeConfidence: include_confidence, includeSpans: true }),
       relations: joint.relations,
