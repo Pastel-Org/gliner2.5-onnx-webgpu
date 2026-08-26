@@ -1,4 +1,4 @@
-import { sigmoid } from "./gliner-boundary.mjs";
+import { sigmoid, resolveOverlapsFlat } from "./gliner-boundary.mjs";
 
 function mentionFromSpan(label, s, e, score, wordOffsets, text) {
   if (s >= e || e > wordOffsets.length || s < 0) return null;
@@ -43,7 +43,9 @@ export function collectLatticeMentions(marg, {
       const key = `${s},${e}`;
       if (!seen.has(key) || p > seen.get(key).p) seen.set(key, { s, e, p });
     }
-    for (const { s, e, p } of seen.values()) {
+    for (const { start: s, end: e, score: p } of resolveOverlapsFlat(
+      [...seen.values()].map(({ s, e, p }) => ({ start: s, end: e, score: p })),
+    )) {
       const m = mentionFromSpan(labels[q], s, e, p, words, normalized);
       if (m) out.push(m);
     }
