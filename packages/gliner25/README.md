@@ -7,7 +7,7 @@ dependencies — you pass `onnxruntime-web` and a tokenizer loader yourself.
 Models: [small](https://huggingface.co/nicolasembleton/gliner2.5-small-v1-onnx) ·
 [base](https://huggingface.co/nicolasembleton/gliner2.5-base-v1-onnx) ·
 [multi](https://huggingface.co/nicolasembleton/gliner2.5-multi-v1-onnx)
-(revision 3 graphs: entity path + classifier + cached `text_states`).
+(revision 4 graphs: entity path + classifier + cached states + `heads.onnx` relation scorer).
 
 ## Install
 
@@ -36,6 +36,7 @@ const gliner = new Gliner25({ ort, session, tokenize });
 await gliner.extract_entities(text, ["person", "organization"], { include_spans: true });
 await gliner.classify_text(text, "sentiment", ["positive", "negative", "neutral"]);
 await gliner.extract_json(text, { product: ["name::str", "price", "features"] });
+await gliner.extract_relations(text, { works_for: { head: ["person"], tail: ["organization"] } });
 ```
 
 ## API surface
@@ -45,7 +46,8 @@ await gliner.extract_json(text, { product: ["name::str", "price", "features"] })
 | `extract_entities` / `extract_entities_long` | v2+ |
 | `extract_json` (field-as-label) | v2+ |
 | `classify_text` | v3 |
-| `extract_relations` (JointIE) | not yet exported |
+| `extract_relations` (JointIE beam in JS) | v4 `heads.onnx` |
+| `extract_json(..., { records: true })` | host zip of list fields, not RecordHead |
 
 Host-side decode, overlap resolution, long-document chunking, and JSON
 field typing are JavaScript here; the ONNX graph does neural scoring only.

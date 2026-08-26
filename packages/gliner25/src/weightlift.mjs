@@ -42,7 +42,7 @@ export function glinerModel({
   if (!tokenizerFromPretrained) throw new Error("glinerModel requires tokenizerFromPretrained(repo)");
   const meta = GLINER_MODELS[size];
   if (!meta) throw new Error(`unknown size ${size}`);
-  const url = hfFileUrl(meta.repo, onnxPath);
+  const url = hfFileUrl(meta.repo, onnxPath) + (onnxPath.includes("?") ? "" : "?v=4");
 
   return {
     async isCached() {
@@ -85,11 +85,34 @@ export function glinerModel({
           executionProviders: providers,
         });
 
+        let headsSession = null;
+        const headsUrl = hfFileUrl(meta.repo, "onnx/heads.onnx") + "?v=4";
+        try {
+          progress.dispatch({ type: "initiate", file: "onnx/heads.onnx" });
+          const headsBytes = await downloadModel(headsUrl, {
+            onProgress: (loaded, total) => {
+              progress.dispatch({
+                type: "progress",
+                file: "onnx/heads.onnx",
+                loaded,
+                total: total || undefined,
+              });
+            },
+          });
+          progress.dispatch({ type: "done", file: "onnx/heads.onnx" });
+          headsSession = await ort.InferenceSession.create(headsBytes.buffer, {
+            executionProviders: providers,
+          });
+        } catch {
+          headsSession = null;
+        }
+
         progress.dispatch({ type: "ready" });
         return new Gliner25({
           ort,
           session,
           tokenize: tokenizeWord(tokenizer),
+          headsSession,
         });
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));

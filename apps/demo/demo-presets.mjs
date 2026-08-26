@@ -1,15 +1,68 @@
 /**
- * Fastino README / tutorial / blog examples, adapted to the entity head
- * this ONNX graph actually runs ([E] queries). Classification ([C]),
- * relation ([R] / JointIE), and record-mode JSON are listed as `blocked`
- * so the page can show the original example without pretending it ran.
+ * Fastino README / tutorial / 2.5 blog examples.
+ * `group` drives the page sections. `source` is a small chip tag.
+ * `view` selects the result pane: entities | json | graph | classify | redact.
  */
+
+export const GROUPS = [
+  {
+    id: "NER",
+    title: "Named entities",
+    blurb: "Zero-shot [E] labels. Same head as the model card.",
+  },
+  {
+    id: "Domain",
+    title: "Domain NER",
+    blurb: "Labels plus [DESCRIPTION] text folded into the parent token.",
+  },
+  {
+    id: "Structure",
+    title: "Structured fields",
+    blurb: "Field-as-label JSON. Same [E] queries under a parent name (product, contact, …).",
+  },
+  {
+    id: "Records",
+    title: "Repeated records",
+    blurb: "Host assignment: the i-th mention of each field becomes one object. Not the neural RecordHead.",
+  },
+  {
+    id: "Relations",
+    title: "Typed relations (JointIE)",
+    blurb: "Entity decode, then the [R] scorer + JS beam. Edges are typed, not co-mention.",
+  },
+  {
+    id: "Classification",
+    title: "Classification",
+    blurb: "v3 [C] head. Argmax over sigmoid(cls_logits).",
+  },
+  {
+    id: "PII",
+    title: "PII / redaction",
+    blurb: "Entity labels, then the page masks the spans.",
+  },
+  {
+    id: "Long span",
+    title: "Long spans",
+    blurb: "Span-free decode: a whole clause costs the same as a two-word name.",
+  },
+  {
+    id: "Long context",
+    title: "Long documents",
+    blurb: "Host chunks overlapping word windows and remaps offsets.",
+  },
+  {
+    id: "Attributes",
+    title: "Span attributes",
+    blurb: "Python scores attributes on kept spans. Here they are extra [E] labels overlaid by overlap.",
+  },
+];
 
 export const PRESETS = [
   {
     id: "ner-card",
     group: "NER",
-    title: "Model card",
+    source: "card",
+    title: "Apple / Cook",
     view: "entities",
     labels: "company, person, product, location",
     text: "Apple CEO Tim Cook announced iPhone 15 in Cupertino yesterday.",
@@ -17,7 +70,8 @@ export const PRESETS = [
   {
     id: "ner-tutorial",
     group: "NER",
-    title: "Tutorial (with date)",
+    source: "tutorial",
+    title: "With date",
     view: "entities",
     labels: "company, person, product, location, date",
     text: "Apple Inc. CEO Tim Cook announced the new iPhone 15 in Cupertino, California on September 12, 2023.",
@@ -25,7 +79,8 @@ export const PRESETS = [
   {
     id: "ner-founders",
     group: "NER",
-    title: "Multiple people",
+    source: "tutorial",
+    title: "Two founders",
     view: "entities",
     labels: "person, organization",
     text: "Bill Gates and Steve Jobs founded Microsoft and Apple respectively.",
@@ -33,7 +88,8 @@ export const PRESETS = [
   {
     id: "ner-fr",
     group: "NER",
-    title: "French (use multi)",
+    source: "demo",
+    title: "French (multi)",
     view: "entities",
     suggestModel: "multi",
     labels: "personne, organisation, lieu, produit",
@@ -42,7 +98,8 @@ export const PRESETS = [
   {
     id: "medical-desc",
     group: "Domain",
-    title: "Clinical + descriptions",
+    source: "tutorial",
+    title: "Clinical",
     view: "entities",
     labels: "medication, dosage, symptom, time",
     descriptions: {
@@ -56,6 +113,7 @@ export const PRESETS = [
   {
     id: "medical-tutorial",
     group: "Domain",
+    source: "tutorial",
     title: "Metformin note",
     view: "entities",
     labels: "drug, disease, symptom, dosage, organ",
@@ -71,6 +129,7 @@ export const PRESETS = [
   {
     id: "legal",
     group: "Domain",
+    source: "tutorial",
     title: "Legal",
     view: "entities",
     labels: "party, law_firm, court, statute, case, judge, legal_term",
@@ -88,6 +147,7 @@ export const PRESETS = [
   {
     id: "finance",
     group: "Domain",
+    source: "tutorial",
     title: "Markets",
     view: "entities",
     labels: "ticker, financial_metric, currency_amount, percentage, financial_org, market_index",
@@ -104,6 +164,7 @@ export const PRESETS = [
   {
     id: "science",
     group: "Domain",
+    source: "tutorial",
     title: "Scientific",
     view: "entities",
     labels: "chemical, organism, gene, measurement, research_method, institution",
@@ -120,7 +181,8 @@ export const PRESETS = [
   {
     id: "json-product",
     group: "Structure",
-    title: "Product fields",
+    source: "readme",
+    title: "MacBook Pro",
     view: "json",
     parent: "product",
     labels: "name, price, features",
@@ -130,6 +192,7 @@ export const PRESETS = [
   {
     id: "json-iphone",
     group: "Structure",
+    source: "tutorial",
     title: "iPhone 15 Pro Max",
     view: "json",
     parent: "product",
@@ -140,6 +203,7 @@ export const PRESETS = [
   {
     id: "json-contact",
     group: "Structure",
+    source: "tutorial",
     title: "Contact card",
     view: "json",
     parent: "contact",
@@ -153,6 +217,7 @@ export const PRESETS = [
   {
     id: "json-trade",
     group: "Structure",
+    source: "tutorial",
     title: "Equity trade",
     view: "json",
     parent: "transaction",
@@ -161,17 +226,9 @@ export const PRESETS = [
     text: "Transaction Report: Goldman Sachs processed a $2.5M equity trade for Tesla Inc. on March 15, 2024. Commission: $1,250. Status: Completed.",
   },
   {
-    id: "json-rx",
-    group: "Structure",
-    title: "Prescriptions",
-    view: "json",
-    parent: "prescription",
-    labels: "medication, dosage, frequency, name, age, symptoms",
-    text: "Patient: Sarah Johnson, 34, presented with acute chest pain and shortness of breath. Prescribed: Lisinopril 10mg daily, Metoprolol 25mg twice daily. Follow-up scheduled for next Tuesday.",
-  },
-  {
     id: "json-event",
     group: "Structure",
+    source: "tutorial",
     title: "Conference",
     view: "json",
     parent: "event",
@@ -180,32 +237,85 @@ export const PRESETS = [
     text: "Tech Conference 2024 on June 15th in San Francisco. Topics include AI, Machine Learning, and Cloud Computing. Registration fee: $299 for early bird tickets.",
   },
   {
+    id: "json-rx",
+    group: "Records",
+    source: "tutorial",
+    title: "Two prescriptions",
+    view: "json",
+    records: true,
+    parent: "prescription",
+    labels: "medication, dosage, frequency, name, age",
+    strFields: ["name", "age"],
+    text: "Patient: Sarah Johnson, 34, presented with acute chest pain and shortness of breath. Prescribed: Lisinopril 10mg daily, Metoprolol 25mg twice daily. Follow-up scheduled for next Tuesday.",
+  },
+  {
     id: "kg-spacex",
-    group: "Knowledge graph",
-    title: "SpaceX (README)",
+    group: "Relations",
+    source: "readme",
+    title: "SpaceX",
     view: "graph",
     labels: "person, organization, location, date",
+    relations: {
+      founded: { head: ["person"], tail: ["organization"] },
+      located_in: { head: ["organization"], tail: ["location"] },
+      acquired: { head: ["organization"], tail: ["organization"] },
+      works_for: { head: ["person"], tail: ["organization"] },
+    },
     text: "Elon Musk founded SpaceX in 2002. SpaceX is located in Hawthorne, California. SpaceX acquired Swarm Technologies in 2021. Many engineers work for SpaceX.",
   },
   {
     id: "kg-blog",
-    group: "Knowledge graph",
-    title: "Cook / Pichai (blog)",
+    group: "Relations",
+    source: "blog",
+    title: "Cook / Pichai",
     view: "graph",
     labels: "person, organization, location",
+    relations: {
+      leads: { head: ["person"], tail: ["organization"] },
+      located_in: { head: ["organization"], tail: ["location"] },
+    },
     text: "Tim Cook leads Apple in Cupertino. Sundar Pichai runs Google in Mountain View.",
   },
   {
     id: "kg-org",
-    group: "Knowledge graph",
-    title: "Org chart text",
+    group: "Relations",
+    source: "tutorial",
+    title: "Org chart",
     view: "graph",
     labels: "person, organization, location",
+    relations: {
+      works_for: { head: ["person"], tail: ["organization"] },
+      lives_in: { head: ["person"], tail: ["location"] },
+      located_in: { head: ["organization"], tail: ["location"] },
+      founded: { head: ["person"], tail: ["organization"] },
+      married_to: { head: ["person"], tail: ["person"], allowSelf: false },
+    },
     text: "John works for Apple Inc. and lives in San Francisco. Apple Inc. is located in Cupertino. Sarah founded TechCorp in 2020. She is married to Mike, who works at Google. TechCorp is located in Seattle.",
+  },
+  {
+    id: "cls-sentiment",
+    group: "Classification",
+    source: "readme",
+    title: "Sentiment",
+    view: "classify",
+    task: "sentiment",
+    labels: "positive, negative, neutral",
+    text: "This laptop has amazing performance but terrible battery life!",
+  },
+  {
+    id: "cls-intent",
+    group: "Classification",
+    source: "tutorial",
+    title: "Intent",
+    view: "classify",
+    task: "intent",
+    labels: "read, write, delete",
+    text: "Delete the temporary file from /tmp",
   },
   {
     id: "pii",
     group: "PII",
+    source: "tutorial",
     title: "Redact contacts",
     view: "redact",
     labels: "person, email, phone, address",
@@ -217,6 +327,7 @@ export const PRESETS = [
   {
     id: "span-long",
     group: "Long span",
+    source: "blog",
     title: "Whole clause",
     view: "entities",
     labels: "party, clause, obligation, duration, notice",
@@ -225,6 +336,7 @@ export const PRESETS = [
   {
     id: "span-address",
     group: "Long span",
+    source: "blog",
     title: "Full address",
     view: "entities",
     labels: "organization, full_address, person",
@@ -236,7 +348,8 @@ export const PRESETS = [
   {
     id: "long-doc",
     group: "Long context",
-    title: "Short contract (chunked)",
+    source: "tutorial",
+    title: "Chunked contract",
     view: "entities",
     chunkSize: 48,
     chunkOverlap: 12,
@@ -246,39 +359,11 @@ export const PRESETS = [
   {
     id: "attr-product",
     group: "Attributes",
-    title: "Product + sentiment overlay",
+    source: "blog",
+    title: "Product sentiment",
     view: "entities",
     labels: "product, positive, negative, neutral",
-    note: "Span attributes in Python are a second decode on the same pass. Here positive/negative/neutral are extra [E] labels; the page attaches the overlapping one to each product.",
+    note: "Span attributes in Python are a second decode on kept spans. Here positive/negative/neutral are extra [E] labels; the page attaches the overlapping one to each product.",
     text: "The iPhone camera is stunning but the battery life is disappointing, while the speakers are fine.",
-  },
-  {
-    id: "cls-sentiment",
-    group: "Classification",
-    title: "Sentiment (v3)",
-    view: "classify",
-    task: "sentiment",
-    labels: "positive, negative, neutral",
-    text: "This laptop has amazing performance but terrible battery life!",
-    note: "Uses the v3 [C] classifier. Constrained multi-task rules stay in JS and are not in this preset.",
-  },
-  {
-    id: "cls-intent",
-    group: "Classification",
-    title: "Intent (v3)",
-    view: "classify",
-    task: "intent",
-    labels: "read, write, delete",
-    text: "Delete the temporary file from /tmp",
-  },
-  {
-    id: "rel-blocked",
-    group: "Not in this graph",
-    title: "extract_relations (blocked)",
-    blocked: "relations",
-    view: "graph",
-    labels: "person, organization, location",
-    text: "John works for Apple Inc. and lives in San Francisco. Apple Inc. is located in Cupertino.",
-    note: "Typed edges need JointIE / the [R] relation head. This page draws co-mention links between entities in the same sentence, which is not JointIE.",
   },
 ];

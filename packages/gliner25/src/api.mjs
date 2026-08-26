@@ -5,7 +5,8 @@
  * field-as-label JSON, and (later) classification / JointIE beam live here.
  */
 
-import { GlinerBoundaryRuntime, GLINER_MODELS, hfFileUrl, downloadModel } from "./gliner-boundary.mjs";
+import { GlinerBoundaryRuntime, GLINER_MODELS, hfFileUrl, downloadModel, decodeEntitiesV2, decodeEntities } from "./gliner-boundary.mjs";
+import { proposeRelationPairs, beamSearchRelations, zipRecords } from "./joint-ie.mjs";
 
 export { GLINER_MODELS, hfFileUrl, downloadModel };
 
@@ -51,9 +52,10 @@ export class Gliner25 {
   /**
    * @param {{ ort: any, session: any, tokenize: (t: string) => number[], pairTemperature?: number }} opts
    */
-  constructor({ ort, session, tokenize, pairTemperature = 1.0, graph = "v2" }) {
-    this.rt = new GlinerBoundaryRuntime({ ort, session, tokenize, pairTemperature });
+  constructor({ ort, session, tokenize, pairTemperature = 1.0, graph = "v2", headsSession = null }) {
+    this.rt = new GlinerBoundaryRuntime({ ort, session, tokenize, pairTemperature, headsSession });
     this.session = session;
+    this.headsSession = headsSession;
     this.graph = graph;
     this.outputs = new Set((session.outputNames || []).map(String));
   }
@@ -127,6 +129,7 @@ export class Gliner25 {
     include_confidence = false,
     include_spans = false,
     descriptions = {},
+    records = false,
   } = {}) {
     const result = {};
     for (const [parent, fields] of Object.entries(structures)) {
@@ -137,22 +140,29 @@ export class Gliner25 {
       const entities = await this.rt.extract(text, labels, {
         threshold, parent, descriptions: desc,
       });
+      const toItem = (h) => (
+        include_confidence || include_spans
+          ? { text: h.text, ...(include_confidence ? { confidence: h.score } : {}), ...(include_spans ? { start: h.start, end: h.end } : {}) }
+          : h.text
+      );
+      if (records) {
+        const fieldHits = {};
+        const strFields = [];
+        for (const p of parsed) {
+          const hits = entities.filter((e) => e.label === p.name).sort((a, b) => a.start - b.start);
+          fieldHits[p.name] = hits.map(toItem);
+          if (p.dtype === "str") strFields.push(p.name);
+        }
+        Object.assign(result, zipRecords(fieldHits, { strFields, parent }));
+        continue;
+      }
       const rec = {};
       for (const p of parsed) {
         const hits = entities.filter((e) => e.label === p.name).sort((a, b) => b.score - a.score);
         if (p.dtype === "str") {
-          const h = hits[0];
-          rec[p.name] = h
-            ? (include_confidence || include_spans
-              ? { text: h.text, ...(include_confidence ? { confidence: h.score } : {}), ...(include_spans ? { start: h.start, end: h.end } : {}) }
-              : h.text)
-            : null;
+          rec[p.name] = hits[0] ? toItem(hits[0]) : null;
         } else {
-          rec[p.name] = hits.map((h) => (
-            include_confidence || include_spans
-              ? { text: h.text, ...(include_confidence ? { confidence: h.score } : {}), ...(include_spans ? { start: h.start, end: h.end } : {}) }
-              : h.text
-          ));
+          rec[p.name] = hits.map(toItem);
         }
       }
       result[parent] = [rec];
@@ -190,10 +200,52 @@ export class Gliner25 {
     return out;
   }
 
-  async extract_relations(_text, _types) {
-    const err = new Error("extract_relations / JointIE needs a v4 graph (relation_scorer). Beam stays in JS.");
-    err.code = "GLINER_HEAD_MISSING";
-    err.head = "relations";
-    throw err;
+  async extract_relations(text, types, {
+    threshold = 0.5,
+    labels,
+    include_confidence = true,
+  } = {}) {
+    if (!this.rt.headsSession) {
+      const err = new Error("extract_relations needs v4 heads.onnx (relation scorer). Beam stays in JS.");
+      err.code = "GLINER_HEAD_MISSING";
+      err.head = "relations";
+      throw err;
+    }
+    const entityLabels = labels || [...new Set(
+      Object.values(types).flatMap((s) => [...(s.head || s.heads || []), ...(s.tail || s.tails || [])]),
+    )];
+    const marg = await this.rt.computeMarginals(text, entityLabels, { relations: types });
+    let entities;
+    if (marg.pairLogits) {
+      entities = decodeEntitiesV2({
+        pairIndices: marg.pairIndices,
+        pairLogits: marg.pairLogits,
+        pairValid: marg.pairValid,
+        candidateCount: marg.candidateCount,
+        labels: marg.labels,
+        wordOffsets: marg.words,
+        text: marg.normalized,
+        threshold,
+        pairTemperature: marg.pairTemperature,
+      });
+    } else {
+      entities = decodeEntities({
+        startLogits: marg.startLogits,
+        endLogits: marg.endLogits,
+        wordCount: marg.words.length,
+        labels: marg.labels,
+        wordOffsets: marg.words,
+        text: marg.normalized,
+        threshold,
+      });
+    }
+    const pairs = proposeRelationPairs(entities, types);
+    const scored = await this.rt.scoreRelations(marg, pairs);
+    const joint = beamSearchRelations(entities, scored, { threshold });
+    return {
+      entities: toEntityMap(entities, { includeConfidence: include_confidence, includeSpans: true }),
+      relations: joint.relations,
+      score: joint.score,
+    };
   }
 }

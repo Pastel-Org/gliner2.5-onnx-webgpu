@@ -103,6 +103,12 @@ export function buildEntitiesSchemaTokens(labels, { parent = "entities", descrip
   return tokens;
 }
 
+export function buildRelationSchemaTokens(relType, { head = "head", tail = "tail", description } = {}) {
+  let prompt = relType;
+  if (description) prompt += ` [DESCRIPTION] ${description}`;
+  return ["(", "[P]", prompt, "(", "[R]", head, "[R]", tail, ")", ")"];
+}
+
 export function buildClassificationSchemaTokens(task, labels, { descriptions } = {}) {
   let prompt = task;
   if (descriptions) {
@@ -124,6 +130,7 @@ export function buildClassificationSchemaTokens(task, labels, { descriptions } =
  * - text word i -> first subword
  * - [E] markers -> query_marker_indices
  * - [C] markers -> cls_marker_indices
+ * - [R] markers -> rel_marker_indices
  */
 export function packInput(tokenize, schemaTokens, textWords) {
   const combined = [...schemaTokens, "[SEP_TEXT]", ...textWords];
@@ -133,6 +140,7 @@ export function packInput(tokenize, schemaTokens, textWords) {
   const textWordFirstPositions = [];
   const queryMarkerPositions = [];
   const clsMarkerPositions = [];
+  const relMarkerPositions = [];
   let lastTextWordIndex = -1;
 
   for (let i = 0; i < combined.length; i++) {
@@ -143,6 +151,7 @@ export function packInput(tokenize, schemaTokens, textWords) {
     if (i < schemaLen) {
       if (token === "[E]") queryMarkerPositions.push(subwordPos);
       if (token === "[C]") clsMarkerPositions.push(subwordPos);
+      if (token === "[R]") relMarkerPositions.push(subwordPos);
     } else if (i === schemaLen) {
       // [SEP_TEXT]
     } else {
@@ -154,7 +163,7 @@ export function packInput(tokenize, schemaTokens, textWords) {
     }
     for (const id of subTokens) inputIds.push(id);
   }
-  return { inputIds, textWordFirstPositions, queryMarkerPositions, clsMarkerPositions };
+  return { inputIds, textWordFirstPositions, queryMarkerPositions, clsMarkerPositions, relMarkerPositions };
 }
 
 /** Numerically stable sigmoid. */
@@ -244,6 +253,8 @@ export function decodeEntities({ startLogits, endLogits, wordCount, labels, word
         start: charStart + lead,
         end: charStart + lead + stripped.length,
         score,
+        wordStart: start,
+        wordEnd: end,
       });
     }
   }
@@ -290,6 +301,8 @@ export function decodeEntitiesV2({
         start: charStart + lead,
         end: charStart + lead + stripped.length,
         score,
+        wordStart: start,
+        wordEnd: end,
       });
     }
   }
@@ -306,12 +319,13 @@ export function decodeEntitiesV2({
  * @param {number} [opts.pairTemperature] v2 graphs: pair logit temperature (1.0 in current exports)
  */
 export class GlinerBoundaryRuntime {
-  constructor({ ort, session, tokenize, pairTemperature = 1.0 }) {
+  constructor({ ort, session, tokenize, pairTemperature = 1.0, headsSession = null }) {
     if (!ort || !session || !tokenize) throw new Error("ort, session and tokenize are required");
     this.ort = ort;
     this.session = session;
     this.tokenize = tokenize;
     this.pairTemperature = pairTemperature;
+    this.headsSession = headsSession;
     this._cache = new Map();
     this.inputNames = new Set((session.inputNames || []).map(String));
     this.outputNames = new Set((session.outputNames || []).map(String));
@@ -334,7 +348,7 @@ export class GlinerBoundaryRuntime {
    */
   async computeMarginals(text, labels, {
     maxWords = 3800, parent = "entities", descriptions,
-    schemaKind = "entities", clsTask = "label",
+    schemaKind = "entities", clsTask = "label", relations,
   } = {}) {
     const normalized = normalizeText(text);
     const words = splitWords(normalized).slice(0, maxWords);
@@ -342,10 +356,17 @@ export class GlinerBoundaryRuntime {
       return { normalized: "", words: [], labels, startLogits: null, endLogits: null };
     }
 
-    const schemaTokens = schemaKind === "classification"
+    let schemaTokens = schemaKind === "classification"
       ? buildClassificationSchemaTokens(clsTask, labels, { descriptions })
       : buildEntitiesSchemaTokens(labels, { parent, descriptions });
-    const { inputIds, textWordFirstPositions, queryMarkerPositions, clsMarkerPositions } = packInput(
+    if (relations && schemaKind !== "classification") {
+      for (const [relType, spec] of Object.entries(relations)) {
+        schemaTokens = schemaTokens.concat(buildRelationSchemaTokens(relType, {
+          description: spec.description,
+        }));
+      }
+    }
+    const { inputIds, textWordFirstPositions, queryMarkerPositions, clsMarkerPositions, relMarkerPositions } = packInput(
       (t) => this._tokenize(t),
       schemaTokens,
       words.map((w) => w.text),
@@ -386,11 +407,26 @@ export class GlinerBoundaryRuntime {
       feeds.cls_marker_mask = new this.ort.Tensor("float32", Float32Array.from(clsMask), [1, K]);
     }
 
+    if (this.inputNames.has("rel_marker_indices")) {
+      let R = relMarkerPositions.length;
+      let relIdx = relMarkerPositions;
+      let relMask = Array.from({ length: R }, () => 1);
+      if (R === 0) {
+        R = 1;
+        relIdx = [0];
+        relMask = [0];
+      }
+      feeds.rel_marker_indices = new this.ort.Tensor("int64", BigInt64Array.from(relIdx.map(BigInt)), [1, R]);
+      feeds.rel_marker_mask = new this.ort.Tensor("float32", Float32Array.from(relMask), [1, R]);
+    }
+
     const results = await this.session.run(feeds);
     const clsLogits = results.cls_logits
       ? Array.from(results.cls_logits.data).slice(0, Math.max(clsMarkerPositions.length, 0))
       : null;
     const textStates = results.text_states ?? null;
+    const relRoleStates = results.rel_role_states ?? null;
+    const extra = { clsLogits, textStates, relRoleStates, relRoleCount: relMarkerPositions.length };
     if (results.pair_logits) {
       return {
         normalized,
@@ -403,8 +439,7 @@ export class GlinerBoundaryRuntime {
         pairValid: results.pair_valid.data,
         candidateCount: results.pair_logits.dims[2],
         pairTemperature: this.pairTemperature,
-        clsLogits,
-        textStates,
+        ...extra,
       };
     }
     return {
@@ -413,8 +448,7 @@ export class GlinerBoundaryRuntime {
       labels,
       startLogits: results.start_logits.data,
       endLogits: results.end_logits.data,
-      clsLogits,
-      textStates,
+      ...extra,
     };
   }
 
@@ -438,6 +472,69 @@ export class GlinerBoundaryRuntime {
     let best = 0;
     for (let i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
     return { label: labels[best], score: scores[best] ?? 0, scores: Object.fromEntries(labels.map((l, i) => [l, scores[i] ?? 0])) };
+  }
+
+  /**
+   * Score proposed (head, tail, relIndex) pairs with heads.onnx.
+   * rel_role_states are concatenated pairwise into directional 2H states.
+   */
+  async scoreRelations(marg, pairs) {
+    if (!this.headsSession) {
+      const err = new Error("no heads.onnx session (need v4 export)");
+      err.code = "GLINER_HEAD_MISSING";
+      throw err;
+    }
+    if (!pairs.length) return [];
+    const textT = marg.textStates;
+    const roleT = marg.relRoleStates;
+    if (!textT || !roleT) {
+      const err = new Error("session has no text_states/rel_role_states");
+      err.code = "GLINER_HEAD_MISSING";
+      throw err;
+    }
+    const L = textT.dims[1];
+    const H = textT.dims[2];
+    const roleCount = Math.max(marg.relRoleCount || 0, 2);
+    const nRel = Math.max(1, Math.floor(roleCount / 2));
+    const roleData = roleT.data;
+    const relStates = new Float32Array(nRel * 2 * H);
+    for (let i = 0; i < nRel; i++) {
+      const a = Math.min(i * 2, roleT.dims[1] - 1);
+      const b = Math.min(i * 2 + 1, roleT.dims[1] - 1);
+      for (let h = 0; h < H; h++) {
+        relStates[i * 2 * H + h] = roleData[a * H + h];
+        relStates[i * 2 * H + H + h] = roleData[b * H + h];
+      }
+    }
+    const P = pairs.length;
+    const headStart = new BigInt64Array(P);
+    const headEnd = new BigInt64Array(P);
+    const tailStart = new BigInt64Array(P);
+    const tailEnd = new BigInt64Array(P);
+    const relIndex = new BigInt64Array(P);
+    const pairMask = new Float32Array(P);
+    for (let i = 0; i < P; i++) {
+      const p = pairs[i];
+      headStart[i] = BigInt(p.headStart);
+      headEnd[i] = BigInt(p.headEnd);
+      tailStart[i] = BigInt(p.tailStart);
+      tailEnd[i] = BigInt(p.tailEnd);
+      relIndex[i] = BigInt(p.relIndex);
+      pairMask[i] = 1;
+    }
+    const feeds = {
+      text_states: textT,
+      rel_states: new this.ort.Tensor("float32", relStates, [1, nRel, 2 * H]),
+      head_start: new this.ort.Tensor("int64", headStart, [1, P]),
+      head_end: new this.ort.Tensor("int64", headEnd, [1, P]),
+      tail_start: new this.ort.Tensor("int64", tailStart, [1, P]),
+      tail_end: new this.ort.Tensor("int64", tailEnd, [1, P]),
+      rel_index: new this.ort.Tensor("int64", relIndex, [1, P]),
+      pair_mask: new this.ort.Tensor("float32", pairMask, [1, P]),
+    };
+    const out = await this.headsSession.run(feeds);
+    const logits = out.rel_logits.data;
+    return pairs.map((p, i) => ({ ...p, logit: logits[i], score: sigmoid(logits[i]) }));
   }
 
   /**

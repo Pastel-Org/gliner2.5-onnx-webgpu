@@ -33,22 +33,40 @@
   select, textarea, input[type="text"] {
     width: 100%;
     font: inherit;
+    font-size: 0.95rem;
     color: var(--pastel-text);
     background: var(--pastel-bg);
     border: 1px solid var(--pastel-border);
     border-radius: var(--pastel-radius-md);
-    padding: .55rem .7rem;
     transition: border-color var(--pastel-duration-fast) var(--pastel-easing), box-shadow var(--pastel-duration-fast) var(--pastel-easing);
+  }
+  select, input[type="text"] {
+    height: 2.5rem;
+    padding: 0 0.75rem;
+    line-height: 2.5rem;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  select {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23B36B4F' d='M1 1l5 5 5-5'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
   }
   select:focus, textarea:focus, input[type="text"]:focus {
     outline: none;
     border-color: var(--pastel-accent);
     box-shadow: var(--pastel-shadow-glow);
   }
-  textarea { min-height: 7.5rem; resize: vertical; }
+  textarea { min-height: 7.5rem; resize: vertical; padding: .7rem .75rem; line-height: 1.45; }
+  .controls {
+    display: grid;
+    grid-template-columns: minmax(14rem, 1fr) 7.5rem;
+    gap: var(--pastel-space-3);
+    align-items: end;
+  }
+  .controls .span-all { grid-column: 1 / -1; }
   .row { display: flex; gap: var(--pastel-space-3); flex-wrap: wrap; align-items: flex-end; }
-  .row > div { flex: 1 1 12rem; }
-  .row > .narrow { flex: 0 0 7rem; }
   button {
     font: inherit;
     font-weight: 600;
@@ -84,6 +102,20 @@
   footer { color: var(--pastel-text-muted); font-size: .8rem; margin-top: var(--pastel-space-8); }
   footer a { color: var(--pastel-accent); text-decoration: none; }
   .chips { display: flex; flex-wrap: wrap; gap: var(--pastel-space-1); }
+  .ex-groups { display: flex; flex-direction: column; gap: var(--pastel-space-5); }
+  .ex-group h3 {
+    margin: 0 0 .2rem;
+    font-size: .78rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--pastel-text-muted);
+  }
+  .ex-group .blurb {
+    margin: 0 0 .45rem;
+    font-size: .82rem;
+    color: var(--pastel-text-secondary);
+  }
   .chip {
     font: inherit;
     font-size: .8rem;
@@ -94,10 +126,21 @@
     border-radius: var(--pastel-radius-full);
     padding: .28rem .7rem;
     cursor: pointer;
+    display: inline-flex;
+    align-items: baseline;
+    gap: .35rem;
     transition: border-color var(--pastel-duration-fast) var(--pastel-easing), color var(--pastel-duration-fast) var(--pastel-easing);
+  }
+  .chip .src {
+    font-size: .62rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--pastel-text-muted);
   }
   .chip:hover { border-color: var(--pastel-accent); }
   .chip.on { background: oklch(0.655 0.135 45 / 0.12); border-color: var(--pastel-accent); color: var(--pastel-accent-dim); }
+  .chip.on .src { color: var(--pastel-accent-dim); }
   .note {
     font-size: .85rem;
     color: var(--pastel-text-muted);
@@ -159,8 +202,8 @@
     <summary>GLiNER2 vs 2.5, and what this page can run</summary>
     <div class="inner">
       <p>GLiNER2 enumerates candidate spans up to a fixed width (about twelve words). Anything longer is invisible. GLiNER2.5 scores start and end boundaries instead, so a forty-word clause costs the same as a two-word name, and the public 4k-word window plus library chunking covers full documents.</p>
-      <p>Fastino's 2.5 blog also adds JointIE knowledge graphs, constrained classification, and span attributes. Those extra heads are in the Python library. This ONNX graph is the boundary entity path: <code>[E]</code> queries, pair reranker, char-offset spans. Structure fields work because they are the same <code>[E]</code> queries under a different parent name. Document classification (<code>[C]</code>) and typed relations (<code>[R]</code> / JointIE beam search) do not.</p>
-      <p>CrossNER is the one public NER number we can check. Fastino reports <b>macro F1</b> on 2.5-base <b>58.30</b> / 2.5-multi <b>54.85</b>. Our JS ONNX v2 domain-macro (same five test splits, threshold 0.5) is <b>55.8</b> / <b>52.2</b>. JS matches Python AutoExtractor on those splits; the remaining ~2.5 points is protocol (token-level vs char-span, not the export). Classification tables (XNLI +24.75, IMDB, …) cannot be reproduced from this graph.</p>
+      <p>Fastino's 2.5 blog also adds JointIE knowledge graphs, constrained classification, and span attributes. This page runs the boundary entity path, the v3 classifier, and (when <code>heads.onnx</code> is loaded) typed JointIE edges. Record-mode JSON is host assignment of repeated fields, not the neural RecordHead.</p>
+      <p>CrossNER is the one public NER number we can check. Fastino reports <b>macro F1</b> on 2.5-base <b>58.30</b> / 2.5-multi <b>54.85</b>. Our JS ONNX domain-macro (same five test splits, threshold 0.5) is <b>55.8</b> / <b>52.2</b>. JS matches Python AutoExtractor on those splits; the remaining ~2.5 points is protocol (token-level vs char-span, not the export).</p>
       <table class="nums">
         <thead><tr><th>CrossNER</th><th>blog 2.5 base</th><th>our JS base</th><th>blog 2.5 multi</th><th>our JS multi</th></tr></thead>
         <tbody>
@@ -176,13 +219,13 @@
   </details>
 
   <div class="card">
-    <label>Examples from the Fastino README, tutorials, and 2.5 blog</label>
-    <div class="chips" id="chips"></div>
+    <label>Examples</label>
+    <div class="ex-groups" id="chips"></div>
     <p class="note" id="preset-note" hidden></p>
   </div>
 
   <div class="card">
-    <div class="row">
+    <div class="controls">
       <div>
         <label for="model">Model</label>
         <select id="model">
@@ -191,12 +234,12 @@
           <option value="multi">multi · 287M · multilingual · 1.12 GB</option>
         </select>
       </div>
-      <div class="narrow">
+      <div>
         <label for="threshold">Threshold</label>
         <input type="text" id="threshold" value="0.5" inputmode="decimal" />
       </div>
-      <div>
-        <label for="labels">Labels ([E] queries)</label>
+      <div class="span-all">
+        <label for="labels">Labels</label>
         <input type="text" id="labels" value="person, organization, location, product" />
       </div>
     </div>
@@ -240,7 +283,7 @@
 <script type="module">
   import { ModelManager } from "https://cdn.jsdelivr.net/npm/weightlift@0.2.1/+esm";
   import { glinerModel } from "../packages/gliner25/src/weightlift.mjs";
-  import { PRESETS } from "./demo-presets.mjs";
+  import { GROUPS, PRESETS } from "./demo-presets.mjs";
 
   const ort = await import("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.webgpu.bundle.min.mjs");
   const { AutoTokenizer, env } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0");
@@ -291,24 +334,34 @@
     }
   }
 
-  const groups = [];
-  for (const p of PRESETS) {
-    if (!groups.includes(p.group)) groups.push(p.group);
-  }
+  const groups = GROUPS;
   for (const g of groups) {
-    const tag = document.createElement("span");
-    tag.style.cssText = "font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:.2rem .2rem 0 0;";
-    tag.textContent = g;
-    el.chips.appendChild(tag);
-    for (const p of PRESETS.filter((x) => x.group === g)) {
+    const section = document.createElement("div");
+    section.className = "ex-group";
+    const h = document.createElement("h3");
+    h.textContent = g.title;
+    const blurb = document.createElement("p");
+    blurb.className = "blurb";
+    blurb.textContent = g.blurb;
+    const row = document.createElement("div");
+    row.className = "chips";
+    for (const p of PRESETS.filter((x) => x.group === g.id)) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "chip" + (p.id === activePreset.id ? " on" : "");
       b.dataset.id = p.id;
-      b.textContent = p.title;
+      b.append(p.title);
+      if (p.source) {
+        const src = document.createElement("span");
+        src.className = "src";
+        src.textContent = p.source;
+        b.append(src);
+      }
       b.addEventListener("click", () => applyPreset(p));
-      el.chips.appendChild(b);
+      row.appendChild(b);
     }
+    section.append(h, blurb, row);
+    el.chips.appendChild(section);
   }
 
   if (navigator.gpu) {
@@ -400,18 +453,43 @@
     const view = preset?.view || "entities";
     if (view === "json") {
       const labels = parseLabels(preset.labels);
-      const rec = {};
-      for (const lab of labels) {
-        const hits = entities.filter((e) => e.label === lab).sort((a, b) => b.score - a.score);
-        rec[lab] = preset.strFields?.includes(lab)
-          ? (hits[0]?.text ?? null)
-          : hits.map((h) => h.text);
+      if (preset.records) {
+        const fieldHits = {};
+        for (const lab of labels) {
+          const hits = entities.filter((e) => e.label === lab).sort((a, b) => a.start - b.start);
+          fieldHits[lab] = hits.map((h) => h.text);
+        }
+        const wrap = {};
+        wrap[preset.parent || "record"] = [];
+        const n = Math.max(1, ...labels.filter((l) => !preset.strFields?.includes(l)).map((l) => fieldHits[l].length));
+        for (let i = 0; i < n; i++) {
+          const rec = {};
+          for (const lab of labels) {
+            rec[lab] = preset.strFields?.includes(lab) ? (fieldHits[lab][0] ?? null) : (fieldHits[lab][i] ?? null);
+          }
+          wrap[preset.parent || "record"].push(rec);
+        }
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(wrap, null, 2);
+        el.extra.appendChild(pre);
+        const note = document.createElement("p");
+        note.className = "note";
+        note.textContent = "Host assignment: i-th mention of each list field is one record. Not the neural RecordHead.";
+        el.extra.appendChild(note);
+      } else {
+        const rec = {};
+        for (const lab of labels) {
+          const hits = entities.filter((e) => e.label === lab).sort((a, b) => b.score - a.score);
+          rec[lab] = preset.strFields?.includes(lab)
+            ? (hits[0]?.text ?? null)
+            : hits.map((h) => h.text);
+        }
+        const wrap = {};
+        wrap[preset.parent || "record"] = [rec];
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(wrap, null, 2);
+        el.extra.appendChild(pre);
       }
-      const wrap = {};
-      wrap[preset.parent || "record"] = [rec];
-      const pre = document.createElement("pre");
-      pre.textContent = JSON.stringify(wrap, null, 2);
-      el.extra.appendChild(pre);
     } else if (view === "graph") {
       const by = {};
       const seen = new Set();
@@ -444,7 +522,7 @@
       const ed = document.createElement("div");
       ed.className = "edges";
       ed.innerHTML = edges.length
-        ? `<b>Same-sentence co-mention</b> (host heuristic, not JointIE):<br>` + edges.map(escapeHtml).join("<br>")
+        ? `<b>Same-sentence co-mention</b> (heads.onnx not loaded; this is not JointIE):<br>` + edges.map(escapeHtml).join("<br>")
         : "No cross-type co-mentions in the same sentence.";
       el.extra.appendChild(ed);
     } else if (view === "redact") {
@@ -496,6 +574,48 @@
         el.raw.textContent = JSON.stringify(result, null, 2);
         el.legend.innerHTML = "";
         el.stats.innerHTML = `classify · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b>`;
+        setStatus("Done.");
+        return;
+      }
+      if (preset?.relations && gliner.headsSession) {
+        const result = await gliner.extract_relations(text, preset.relations, { threshold, labels });
+        const dt = performance.now() - t0;
+        const flat = [];
+        for (const [lab, items] of Object.entries(result.entities || {})) {
+          for (const it of items) {
+            flat.push({ label: lab, text: it.text, start: it.start, end: it.end, score: it.confidence ?? 0 });
+          }
+        }
+        renderHighlight(text, flat);
+        el.extra.innerHTML = "";
+        const kg = document.createElement("div");
+        kg.className = "kg";
+        const by = {};
+        for (const e of flat) (by[e.label] ??= []).push(e);
+        for (const [lab, list] of Object.entries(by)) {
+          const col = document.createElement("div");
+          col.className = "kg-col";
+          const seen = new Set();
+          col.innerHTML = `<h3>${escapeHtml(lab)}</h3>` + list.filter((e) => {
+            const k = e.text.toLowerCase();
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          }).map((e) => `<div class="node">${escapeHtml(e.text)}</div>`).join("");
+          kg.appendChild(col);
+        }
+        el.extra.appendChild(kg);
+        const ed = document.createElement("div");
+        ed.className = "edges";
+        const rels = result.relations || [];
+        ed.innerHTML = rels.length
+          ? `<b>JointIE beam</b> (typed [R] scorer, not co-mention):<br>` +
+            rels.map((r) => `${escapeHtml(r.head.text)} —${escapeHtml(r.type)}→ ${escapeHtml(r.tail.text)} (${r.score.toFixed(3)})`).join("<br>")
+          : "No typed edges above threshold.";
+        el.extra.appendChild(ed);
+        el.raw.textContent = JSON.stringify(result, null, 2);
+        el.legend.innerHTML = "";
+        el.stats.innerHTML = `${flat.length} entities · ${rels.length} edges · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b>`;
         setStatus("Done.");
         return;
       }
