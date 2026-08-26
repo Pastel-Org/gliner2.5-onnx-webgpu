@@ -599,11 +599,22 @@ export class GlinerBoundaryRuntime {
     let anchor = parsed.findIndex((p) => p.dtype === "list");
     if (anchor < 0) anchor = parsed.findIndex((p) => p.dtype === "str");
     if (anchor < 0) anchor = 0;
-    const instSlots = [];
+    const raw = [];
     for (let c = 0; c < C; c++) {
       if (!marg.pairValid[anchor * C + c]) continue;
       const p = sigmoid(marg.pairLogits[anchor * C + c] / temp);
-      if (p >= threshold) instSlots.push(c);
+      if (p < threshold) continue;
+      const s = Number(marg.pairIndices[anchor * C * 2 + c * 2]);
+      const e = Number(marg.pairIndices[anchor * C * 2 + c * 2 + 1]);
+      raw.push({ c, s, e, p });
+    }
+    raw.sort((a, b) => b.p - a.p);
+    const instSlots = [];
+    const kept = [];
+    for (const sp of raw) {
+      if (kept.some((k) => !(sp.e <= k.s || k.e <= sp.s))) continue;
+      kept.push(sp);
+      instSlots.push(sp.c);
     }
     if (!instSlots.length) return null;
     const N = instSlots.length;
@@ -629,7 +640,7 @@ export class GlinerBoundaryRuntime {
       field_cand_mask: new this.ort.Tensor("float32", fieldMask, [1, Q, C]),
     };
     const out = await this.recordsSession.run(feeds);
-    return { instSlots, assign: out.assign_logits.data, objectLogits: out.object_logits.data };
+    return { instSlots, anchor, assign: out.assign_logits.data, objectLogits: out.object_logits.data };
   }
 
   /**

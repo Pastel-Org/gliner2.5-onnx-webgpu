@@ -154,6 +154,7 @@ export class Gliner25 {
         if (scored) {
           Object.assign(result, decodeAssignedRecords({
             parent, parsed, instSlots: scored.instSlots, assign: scored.assign, marg, toItem,
+            anchor: scored.anchor,
           }));
           continue;
         }

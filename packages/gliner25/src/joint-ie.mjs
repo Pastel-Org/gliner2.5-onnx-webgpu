@@ -209,7 +209,7 @@ export function attachAttributesFromLattice(entities, attrMarg, attrLabels) {
 }
 
 export function decodeAssignedRecords({
-  parent, parsed, instSlots, assign, marg, toItem,
+  parent, parsed, instSlots, assign, marg, toItem, anchor = 0,
 }) {
   const C = marg.candidateCount;
   const F = parsed.length;
@@ -218,6 +218,15 @@ export function decodeAssignedRecords({
   for (let i = 0; i < instSlots.length; i++) {
     const rec = {};
     for (let f = 0; f < F; f++) {
+      if (f === anchor) {
+        const c = instSlots[i];
+        const s = Number(marg.pairIndices[f * C * 2 + c * 2]);
+        const e = Number(marg.pairIndices[f * C * 2 + c * 2 + 1]);
+        const p = sigmoid(marg.pairLogits[f * C + c] / temp);
+        const m = mentionFromSpan(parsed[f].name, s, e, p, marg.words, marg.normalized);
+        rec[parsed[f].name] = parsed[f].dtype === "list" ? (m ? [toItem(m)] : []) : (m ? toItem(m) : null);
+        continue;
+      }
       const width = C + 1;
       const base = i * F * width + f * width;
       const nullLogit = assign[base];
