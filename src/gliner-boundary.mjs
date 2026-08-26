@@ -1,0 +1,346 @@
+/**
+ * GLiNER2.5 BoundaryExtractor — ONNX Runtime Web (WebGPU) inference, in the browser.
+ *
+ * Host-side protocol for the gliner2.5-*-onnx boundary-architecture exports
+ * (DeBERTa encoder + boundary heads, opset 17). The ONNX graph runs the
+ * encoder over packed input_ids and emits per-query boundary marginals
+ * start_logits / end_logits [B, Q, L+1]; everything else — word splitting,
+ * entity-schema packing, subword/query routing, span decode — lives here.
+ *
+ * Protocol reference: fastino-ai/GLiNER2 (Apache-2.0), gliner2/processor.py
+ * and gliner2/models/boundary/*. Clean-room reimplementation in JS.
+ *
+ * Decode note: the export exposes boundary marginals only (no pair reranker
+ * output). A span's score is min(sigmoid(start), sigmoid(end)) — a marginal
+ * proxy for the upstream pair score.
+ *
+ * Pure ES module, no Node APIs. Pair it with any tokenizer that can encode a
+ * single token to subword ids (e.g. transformers.js AutoTokenizer).
+ */
+
+export const GLINER_MODELS = {
+  small: {
+    repo: "nicolasembleton/gliner2.5-small-v1-onnx",
+    params: "74M",
+    encoder: "DeBERTa-v3-xsmall",
+    languages: "English",
+  },
+  base: {
+    repo: "nicolasembleton/gliner2.5-base-v1-onnx",
+    params: "194M",
+    encoder: "DeBERTa-v3-base",
+    languages: "English",
+  },
+  multi: {
+    repo: "nicolasembleton/gliner2.5-multi-v1-onnx",
+    params: "287M",
+    encoder: "mDeBERTa-v3-base",
+    languages: "Multilingual",
+  },
+};
+
+/** HF resolve URL for a repo file (LFS-aware, CORS-enabled). */
+export function hfFileUrl(repo, file) {
+  return `https://huggingface.co/${repo}/resolve/main/${file}`;
+}
+
+/**
+ * Upstream WhitespaceTokenSplitter pattern (word_splitter.py), JS port.
+ * Match on the ORIGINAL text (case-insensitive) so offsets index the
+ * caller's string; token VALUES are lowercased afterwards.
+ */
+const WORD_PATTERN = new RegExp(
+  String.raw`(?:https?://[^\s]+|www\.[^\s]+)` +
+    String.raw`|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}` +
+    String.raw`|@[a-z0-9_]+` +
+    String.raw`|[\p{L}\p{N}_]+(?:[-_][\p{L}\p{N}_]+)*` +
+    String.raw`|\S`,
+  "giu",
+);
+
+/** Split text into words with character offsets into the original string. */
+export function splitWords(text) {
+  const words = [];
+  WORD_PATTERN.lastIndex = 0;
+  let m;
+  while ((m = WORD_PATTERN.exec(text)) !== null) {
+    words.push({ text: m[0].toLowerCase(), start: m.index, end: m.index + m[0].length });
+  }
+  return words;
+}
+
+/** Normalize text like upstream _collate_batch: ensure terminal punctuation. */
+export function normalizeText(text) {
+  if (!text) return ".";
+  if (text.endsWith(".") || text.endsWith("!") || text.endsWith("?")) return text;
+  return text + ".";
+}
+
+/**
+ * Entities-only schema token layout (upstream _transform_schema, no
+ * descriptions): "(" "[P]" "entities" "(" "[E]" label1 "[E]" label2 ... ")" ")"
+ */
+export function buildEntitiesSchemaTokens(labels) {
+  const tokens = ["(", "[P]", "entities", "("];
+  for (const label of labels) {
+    tokens.push("[E]", label);
+  }
+  tokens.push(")", ")");
+  return tokens;
+}
+
+/**
+ * Pack schema + text into input_ids and routing indices
+ * (upstream _format_input_with_mapping):
+ * - combined = schemaTokens + [SEP_TEXT] + textWords, each combined token
+ *   subword-tokenized independently
+ * - text word i -> position of its FIRST subword (token_pooling="first")
+ * - query q -> the q-th "[E]" marker SLOT (positional schema indices 4,6,8…,
+ *   never matched by label content)
+ *
+ * @param {(token: string) => number[]} tokenize  subword ids for one token
+ */
+export function packInput(tokenize, schemaTokens, textWords) {
+  const combined = [...schemaTokens, "[SEP_TEXT]", ...textWords];
+  const schemaLen = schemaTokens.length;
+
+  const markerSlots = new Set([1]);
+  for (let i = 4; i < schemaLen - 2; i += 2) markerSlots.add(i);
+
+  const inputIds = [];
+  const textWordFirstPositions = [];
+  const queryMarkerPositions = [];
+  let lastTextWordIndex = -1;
+
+  for (let i = 0; i < combined.length; i++) {
+    const token = combined[i];
+    const subwordPos = inputIds.length;
+    const subTokens = tokenize(token);
+
+    if (i < schemaLen) {
+      if (markerSlots.has(i) && i >= 4) queryMarkerPositions.push(subwordPos);
+    } else if (i === schemaLen) {
+      // [SEP_TEXT]: contributes ids, no routing
+    } else {
+      const wordIndex = i - (schemaLen + 1);
+      if (wordIndex !== lastTextWordIndex) {
+        textWordFirstPositions.push(subwordPos);
+        lastTextWordIndex = wordIndex;
+      }
+    }
+    for (const id of subTokens) inputIds.push(id);
+  }
+  return { inputIds, textWordFirstPositions, queryMarkerPositions };
+}
+
+/** Numerically stable sigmoid. */
+export function sigmoid(x) {
+  if (x >= 0) return 1 / (1 + Math.exp(-x));
+  const e = Math.exp(x);
+  return e / (1 + e);
+}
+
+/**
+ * Weighted interval scheduling: max-total-score non-overlapping subset.
+ * Spans use half-open word indices [start, end). Flat overlap policy.
+ */
+export function resolveOverlapsFlat(spans) {
+  if (spans.length === 0) return [];
+  const sorted = [...spans].sort((a, b) => a.end - b.end || a.start - b.start);
+  const n = sorted.length;
+  const p = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    let lo = 0, hi = i - 1, cand = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid].end <= sorted[i].start) { cand = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    p[i] = cand;
+  }
+  const M = new Float64Array(n);
+  M[0] = sorted[0].score;
+  for (let i = 1; i < n; i++) {
+    const withI = sorted[i].score + (p[i] >= 0 ? M[p[i]] : 0);
+    M[i] = Math.max(M[i - 1], withI);
+  }
+  const out = [];
+  let i = n - 1;
+  while (i >= 0) {
+    const withI = sorted[i].score + (p[i] >= 0 ? M[p[i]] : 0);
+    if (i === 0) {
+      if (M[0] > 0 || n === 1) out.push(sorted[0]);
+      break;
+    }
+    if (withI >= M[i - 1]) {
+      out.push(sorted[i]);
+      i = p[i];
+    } else {
+      i = i - 1;
+    }
+  }
+  return out.reverse();
+}
+
+/**
+ * Decode boundary marginals into character-offset entities.
+ * Boundary i (0..L) sits before word i; boundary L sits after the last word.
+ * Span (i, j), i < j, covers words i..j-1. Score: min(p_start[i], p_end[j]).
+ *
+ * @returns {Array<{label:string,text:string,start:number,end:number,score:number}>}
+ *   start/end are half-open character offsets into `text`;
+ *   text.slice(start, end) === entity.text.
+ */
+export function decodeEntities({ startLogits, endLogits, wordCount, labels, wordOffsets, text, threshold = 0.5 }) {
+  const L = wordCount;
+  const stride = L + 1;
+  const entities = [];
+  for (let q = 0; q < labels.length; q++) {
+    const spans = [];
+    for (let i = 0; i < L; i++) {
+      const ps = sigmoid(startLogits[q * stride + i]);
+      if (ps < threshold) continue;
+      for (let j = i + 1; j <= L; j++) {
+        const pe = sigmoid(endLogits[q * stride + j]);
+        if (pe < threshold) continue;
+        const score = Math.min(ps, pe);
+        if (score >= threshold) spans.push({ start: i, end: j, score });
+      }
+    }
+    for (const { start, end, score } of resolveOverlapsFlat(spans)) {
+      const charStart = wordOffsets[start].start;
+      const charEnd = wordOffsets[end - 1].end;
+      const surface = text.slice(charStart, charEnd);
+      const lead = surface.length - surface.trimStart().length;
+      const stripped = surface.trim();
+      if (!stripped) continue;
+      entities.push({
+        label: labels[q],
+        text: stripped,
+        start: charStart + lead,
+        end: charStart + lead + stripped.length,
+        score,
+      });
+    }
+  }
+  return entities;
+}
+
+/**
+ * GLiNER boundary runtime over an existing ORT-web session + tokenizer.
+ *
+ * @param {object} opts
+ * @param {import("onnxruntime-web")} opts.ort        the ort module
+ * @param {import("onnxruntime-web").InferenceSession} opts.session
+ * @param {(token: string) => number[]} opts.tokenize subword ids for one token
+ */
+export class GlinerBoundaryRuntime {
+  constructor({ ort, session, tokenize }) {
+    if (!ort || !session || !tokenize) throw new Error("ort, session and tokenize are required");
+    this.ort = ort;
+    this.session = session;
+    this.tokenize = tokenize;
+    this._cache = new Map();
+  }
+
+  /** Cached subword ids for one combined token. */
+  _tokenize(token) {
+    let ids = this._cache.get(token);
+    if (ids === undefined) {
+      ids = this.tokenize(token);
+      if (this._cache.size > 100_000) this._cache.clear();
+      this._cache.set(token, ids);
+    }
+    return ids;
+  }
+
+  /**
+   * Run the encoder; return everything needed to decode spans (lets callers
+   * sweep thresholds without re-running inference).
+   */
+  async computeMarginals(text, labels, { maxWords = 3800 } = {}) {
+    const normalized = normalizeText(text);
+    const words = splitWords(normalized).slice(0, maxWords);
+    if (words.length === 0) {
+      return { normalized: "", words: [], labels, startLogits: null, endLogits: null };
+    }
+
+    const schemaTokens = buildEntitiesSchemaTokens(labels);
+    const { inputIds, textWordFirstPositions, queryMarkerPositions } = packInput(
+      (t) => this._tokenize(t),
+      schemaTokens,
+      words.map((w) => w.text),
+    );
+
+    const T = inputIds.length;
+    const L = words.length;
+    const Q = queryMarkerPositions.length;
+    if (Q !== labels.length) {
+      throw new Error(`query routing mismatch: ${Q} markers for ${labels.length} labels`);
+    }
+
+    const feeds = {
+      input_ids: new this.ort.Tensor("int64", BigInt64Array.from(inputIds.map(BigInt)), [1, T]),
+      attention_mask: new this.ort.Tensor("int64", BigInt64Array.from({ length: T }, () => 1n), [1, T]),
+      text_word_indices: new this.ort.Tensor("int64", BigInt64Array.from(textWordFirstPositions.map(BigInt)), [1, L]),
+      text_word_mask: new this.ort.Tensor("float32", Float32Array.from({ length: L }, () => 1), [1, L]),
+      query_marker_indices: new this.ort.Tensor("int64", BigInt64Array.from(queryMarkerPositions.map(BigInt)), [1, Q]),
+      query_marker_mask: new this.ort.Tensor("float32", Float32Array.from({ length: Q }, () => 1), [1, Q]),
+    };
+
+    const results = await this.session.run(feeds);
+    return {
+      normalized,
+      words,
+      labels,
+      startLogits: results.start_logits.data,
+      endLogits: results.end_logits.data,
+    };
+  }
+
+  /**
+   * Extract entities.
+   * @returns {Promise<Array<{label:string,text:string,start:number,end:number,score:number}>>}
+   */
+  async extract(text, labels, { threshold = 0.5, maxWords = 3800 } = {}) {
+    const marg = await this.computeMarginals(text, labels, { maxWords });
+    if (!marg.startLogits) return [];
+    return decodeEntities({
+      startLogits: marg.startLogits,
+      endLogits: marg.endLogits,
+      wordCount: marg.words.length,
+      labels: marg.labels,
+      wordOffsets: marg.words,
+      text: marg.normalized,
+      threshold,
+    });
+  }
+}
+
+/**
+ * Download a model with progress, reporting bytes as they stream.
+ * @returns {Promise<Uint8Array>}
+ */
+export async function downloadModel(url, { onProgress } = {}) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`download failed: ${res.status} ${url}`);
+  const total = Number(res.headers.get("content-length")) || 0;
+  if (!res.body) return new Uint8Array(await res.arrayBuffer());
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (onProgress) onProgress(received, total);
+  }
+  const out = new Uint8Array(received);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.length;
+  }
+  return out;
+}

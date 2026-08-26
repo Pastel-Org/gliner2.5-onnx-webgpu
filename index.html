@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GLiNER2.5 · ONNX WebGPU demo</title>
+<style>
+  :root {
+    --bg: #faf7f4;
+    --card: #ffffff;
+    --ink: #2d2a26;
+    --muted: #8a817a;
+    --accent: #b36b4f; /* Pastel Clay terracotta */
+    --accent-soft: #f3e3db;
+    --line: #e8e0da;
+    --radius: 0.625rem;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.55;
+  }
+  main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  h1 { font-size: 1.45rem; margin: 0 0 .25rem; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  .sub { color: var(--muted); margin: 0 0 1.75rem; font-size: .92rem; }
+  .sub a { color: var(--accent); text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  label { display: block; font-size: .78rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: .4rem; }
+  select, textarea, input[type="text"] {
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: .55rem .7rem;
+  }
+  textarea { min-height: 6.5rem; resize: vertical; }
+  .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: flex-end; }
+  .row > div { flex: 1 1 12rem; }
+  .row > .narrow { flex: 0 0 7rem; }
+  button {
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius);
+    padding: .6rem 1.4rem;
+    cursor: pointer;
+  }
+  button:disabled { background: var(--line); color: var(--muted); cursor: wait; }
+  .status { font-size: .85rem; color: var(--muted); margin-top: .6rem; min-height: 1.2em; }
+  .status.err { color: #b3402a; }
+  mark {
+    background: var(--accent-soft);
+    border-bottom: 2px solid var(--accent);
+    border-radius: .2rem .2rem 0 0;
+    padding: .05em .15em;
+  }
+  mark.alt { background: #e7ecdf; border-bottom-color: #7d9464; }
+  mark.alt2 { background: #e3e9f2; border-bottom-color: #7189a8; }
+  mark.alt3 { background: #f0e6ef; border-bottom-color: #a0759b; }
+  .legend { display: flex; flex-wrap: wrap; gap: .35rem .9rem; font-size: .8rem; color: var(--muted); margin-top: .8rem; }
+  .legend b { color: var(--ink); font-weight: 600; }
+  .stats { font-family: var(--mono); font-size: .8rem; color: var(--muted); margin-top: .8rem; }
+  .stats b { color: var(--ink); }
+  details { margin-top: 1rem; font-size: .85rem; }
+  summary { cursor: pointer; color: var(--muted); }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: .8rem; overflow-x: auto; font-size: .78rem; font-family: var(--mono); }
+  footer { color: var(--muted); font-size: .8rem; margin-top: 2rem; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>GLiNER2.5 <span>· ONNX WebGPU</span></h1>
+  <p class="sub">
+    Zero-shot NER fully in your browser. Models:
+    <a href="https://huggingface.co/nicolasembleton/gliner2.5-small-v1-onnx">small</a> ·
+    <a href="https://huggingface.co/nicolasembleton/gliner2.5-base-v1-onnx">base</a> ·
+    <a href="https://huggingface.co/nicolasembleton/gliner2.5-multi-v1-onnx">multi</a>
+    — nothing leaves this page except the model download from Hugging Face.
+  </p>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="model">Model</label>
+        <select id="model">
+          <option value="small" selected>small · 74M · English · 272 MB</option>
+          <option value="base">base · 194M · English · 705 MB</option>
+          <option value="multi">multi · 287M · multilingual · 1.1 GB</option>
+        </select>
+      </div>
+      <div class="narrow">
+        <label for="threshold">Threshold</label>
+        <input type="text" id="threshold" value="0.5" inputmode="decimal" />
+      </div>
+      <div>
+        <label for="labels">Labels</label>
+        <input type="text" id="labels" value="person, organization, location, product" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label for="text">Text</label>
+    <textarea id="text">Apple CEO Tim Cook announced iPhone 15 in Cupertino yesterday.</textarea>
+    <div class="row" style="margin-top: .8rem;">
+      <button id="run">Load model &amp; extract</button>
+    </div>
+    <div class="status" id="status">WebGPU: checking…</div>
+  </div>
+
+  <div class="card">
+    <label>Result</label>
+    <p id="output" style="margin: 0; font-size: 1.02rem;">Entities will appear here.</p>
+    <div class="legend" id="legend"></div>
+    <div class="stats" id="stats"></div>
+    <details>
+      <summary>Raw entities (JSON)</summary>
+      <pre id="raw"></pre>
+    </details>
+  </div>
+
+  <footer>
+    Protocol clean-room reimplemented from <a href="https://github.com/fastino-ai/GLiNER2">fastino-ai/GLiNER2</a> (Apache-2.0) ·
+    models Apache-2.0 · runs on <a href="https://onnxruntime.ai/docs/tutorials/web/">ONNX Runtime Web</a> ·
+    demo part of <a href="https://github.com/Pastel-Org/gliner2.5-onnx-webgpu">Pastel-Org/gliner2.5-onnx-webgpu</a>
+  </footer>
+</main>
+
+<script type="module">
+  import {
+    GLINER_MODELS, hfFileUrl, GlinerBoundaryRuntime, downloadModel,
+  } from "./src/gliner-boundary.mjs";
+
+  const ort = await import("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.webgpu.bundle.min.mjs");
+
+  const $ = (id) => document.getElementById(id);
+  const el = {
+    model: $("model"), threshold: $("threshold"), labels: $("labels"),
+    text: $("text"), run: $("run"), status: $("status"), output: $("output"),
+    legend: $("legend"), stats: $("stats"), raw: $("raw"),
+  };
+
+  let session = null;
+  let sessionKey = null;
+  let tokenizer = null;
+  let tokenizerKey = null;
+  const deviceLabel = { value: "?" };
+
+  function setStatus(msg, err = false) {
+    el.status.textContent = msg;
+    el.status.className = "status" + (err ? " err" : "");
+  }
+
+  // WebGPU capability check
+  if (navigator.gpu) {
+    try {
+      const adapter = await navigator.gpu.requestAdapter();
+      deviceLabel.value = adapter ? "WebGPU" : "none";
+    } catch { deviceLabel.value = "none"; }
+  } else {
+    deviceLabel.value = "none";
+  }
+
+  async function ensureSession(modelKey) {
+    if (session && sessionKey === modelKey) return;
+    const meta = GLINER_MODELS[modelKey];
+
+    // Tokenizer (small download, via transformers.js)
+    if (!tokenizer || tokenizerKey !== modelKey) {
+      setStatus(`Loading tokenizer (${meta.repo})…`);
+      const { AutoTokenizer, env } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0");
+      env.allowLocalModels = false;
+      tokenizer = await AutoTokenizer.from_pretrained(meta.repo);
+      tokenizerKey = modelKey;
+    }
+
+    // ONNX session (large download, streamed with progress)
+    if (session) { await session.release(); session = null; }
+    const bytes = await downloadModel(hfFileUrl(meta.repo, "onnx/model.onnx"), {
+      onProgress: (done, total) => {
+        const mb = (n) => (n / 1024 / 1024).toFixed(1);
+        setStatus(total
+          ? `Downloading ${meta.repo} — ${mb(done)} / ${mb(total)} MB`
+          : `Downloading ${meta.repo} — ${mb(done)} MB`);
+      },
+    });
+    setStatus(`Creating session (${deviceLabel.value})…`);
+    const opts = { executionProviders: ["webgpu"] };
+    if (deviceLabel.value !== "WebGPU") opts.executionProviders = ["wasm"];
+    session = await ort.InferenceSession.create(bytes.buffer, opts);
+    sessionKey = modelKey;
+  }
+
+  function tokenizeWord(tokenizer) {
+    return (token) => {
+      const ids = tokenizer.encode(token, { add_special_tokens: false });
+      return Array.isArray(ids) ? ids : Array.from(ids.ids ?? []);
+    };
+  }
+
+  function render(text, entities) {
+    // group overlapping spans for nested highlighting
+    const marks = entities
+      .slice()
+      .sort((a, b) => a.start - b.start || b.end - a.end);
+    let html = "";
+    let cursor = 0;
+    let alt = 0;
+    const escape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    for (const e of marks) {
+      if (e.start < cursor) continue; // skip overlaps beyond first layer
+      html += escape(text.slice(cursor, e.start));
+      html += `<mark class="${alt % 4 === 1 ? "alt" : alt % 4 === 2 ? "alt2" : alt % 4 === 3 ? "alt3" : ""}">${escape(e.text)}</mark>`;
+      cursor = e.end;
+      alt++;
+    }
+    html += escape(text.slice(cursor));
+    el.output.innerHTML = html;
+    el.raw.textContent = JSON.stringify(entities, null, 2);
+    const byLabel = {};
+    for (const e of entities) (byLabel[e.label] ??= []).push(e.text);
+    el.legend.innerHTML = Object.entries(byLabel)
+      .map(([l, xs]) => `<span><b>${l}</b> ${xs.length > 1 ? "×" + xs.length : ""}</span>`)
+      .join("");
+  }
+
+  el.run.addEventListener("click", async () => {
+    el.run.disabled = true;
+    try {
+      const modelKey = el.model.value;
+      const threshold = Math.min(1, Math.max(0, parseFloat(el.threshold.value) || 0.5));
+      const labels = el.labels.value.split(",").map((s) => s.trim()).filter(Boolean);
+      const text = el.text.value;
+      if (!labels.length || !text.trim()) throw new Error("need text and at least one label");
+
+      await ensureSession(modelKey);
+      const rt = new GlinerBoundaryRuntime({ ort, session, tokenize: tokenizeWord(tokenizer) });
+
+      setStatus(`Running on ${deviceLabel.value}…`);
+      const t0 = performance.now();
+      const entities = await rt.extract(text, labels, { threshold });
+      const dt = performance.now() - t0;
+
+      render(text, entities);
+      el.stats.innerHTML = `${entities.length} entities · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b> · threshold: <b>${threshold}</b>`;
+      setStatus(`Done. ${deviceLabel.value === "WebGPU" ? "" : "(WASM fallback — no WebGPU adapter)"}`);
+    } catch (err) {
+      console.error(err);
+      setStatus(String(err?.message ?? err), true);
+    } finally {
+      el.run.disabled = false;
+    }
+  });
+
+  // model switch resets session
+  el.model.addEventListener("change", () => { session = null; sessionKey = null; });
+
+  setStatus(deviceLabel.value === "WebGPU"
+    ? "WebGPU adapter available. Click extract."
+    : "No WebGPU adapter — will fall back to WASM (slower).");
+</script>
+</body>
+</html>
