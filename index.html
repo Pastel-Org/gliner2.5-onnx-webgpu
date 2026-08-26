@@ -404,7 +404,13 @@
       el.extra.appendChild(pre);
     } else if (view === "graph") {
       const by = {};
-      for (const e of entities) (by[e.label] ??= []).push(e);
+      const seen = new Set();
+      for (const e of entities) {
+        const key = `${e.label}\0${e.text.toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        (by[e.label] ??= []).push(e);
+      }
       const kg = document.createElement("div");
       kg.className = "kg";
       for (const [lab, list] of Object.entries(by)) {
