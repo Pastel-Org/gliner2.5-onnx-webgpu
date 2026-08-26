@@ -1,0 +1,68 @@
+/**
+ * Pastel Clay tokens (subset) for the GLiNER2.5 demo.
+ * Canonical: mypastel-cloud/packages/design-system/pastel-clay.css (BLG-289).
+ * Sepia theme only; demo is single-theme. Values copied, not vendored logic.
+ */
+:root {
+  /* Raw Sepia palette */
+  --pastel-page: oklch(0.94 0.022 80);
+  --pastel-surface: oklch(0.97 0.012 80);
+  --pastel-elevated: oklch(0.955 0.016 80);
+  --pastel-ink: oklch(0.27 0.018 60);
+  --pastel-ink-2: oklch(0.40 0.018 60);
+  --pastel-ink-muted: oklch(0.35 0.016 65);
+  --pastel-border: oklch(0.88 0.014 78);
+  --pastel-border-subtle: oklch(0.94 0.010 80 / 0.6);
+
+  /* Accent: Terracotta Clay */
+  --pastel-accent: oklch(0.655 0.135 45);
+  --pastel-accent-dim: oklch(0.555 0.145 42);
+  --pastel-accent-bright: oklch(0.72 0.140 45);
+  --pastel-accent-glow: oklch(0.655 0.135 45 / 0.25);
+
+  /* Secondary accents */
+  --pastel-sage: oklch(0.71 0.05 130);
+  --pastel-sage-glow: oklch(0.71 0.05 130 / 0.25);
+  --pastel-mustard: oklch(0.805 0.11 75);
+  --pastel-denim: oklch(0.62 0.045 230);
+
+  /* Semantic */
+  --pastel-bg: var(--pastel-page);
+  --pastel-text: var(--pastel-ink);
+  --pastel-text-secondary: var(--pastel-ink-2);
+  --pastel-text-muted: var(--pastel-ink-muted);
+  --pastel-success: var(--pastel-sage);
+  --pastel-destructive: oklch(0.40 0.16 30);
+
+  /* Shadows */
+  --pastel-shadow-sm: 0 2px 10px -3px oklch(0.25 0.02 55 / 0.12);
+  --pastel-shadow: 0 22px 60px -20px oklch(0.25 0.02 55 / 0.22);
+  --pastel-shadow-glow: 0 0 20px -5px oklch(0.655 0.135 45 / 0.25);
+
+  /* Typography */
+  --pastel-font-ui: 'Bricolage Grotesque', system-ui, sans-serif;
+  --pastel-font-body: 'Source Serif 4', Georgia, serif;
+  --pastel-font-mono: 'Commit Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Spacing (4px base) */
+  --pastel-space-1: 0.25rem;
+  --pastel-space-2: 0.5rem;
+  --pastel-space-3: 0.75rem;
+  --pastel-space-4: 1rem;
+  --pastel-space-5: 1.25rem;
+  --pastel-space-6: 1.5rem;
+  --pastel-space-8: 2rem;
+  --pastel-space-12: 3rem;
+
+  /* Radii — Luma scale */
+  --pastel-radius-sm: calc(0.625rem - 4px);
+  --pastel-radius-md: calc(0.625rem - 2px);
+  --pastel-radius-lg: 0.625rem;
+  --pastel-radius-xl: calc(0.625rem + 4px);
+  --pastel-radius-full: 9999px;
+
+  /* Motion */
+  --pastel-duration-fast: 100ms;
+  --pastel-duration-normal: 200ms;
+  --pastel-easing: cubic-bezier(0.4, 0, 0.2, 1);
+}

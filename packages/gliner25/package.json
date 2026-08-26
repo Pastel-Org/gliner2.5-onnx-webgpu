@@ -1,0 +1,38 @@
+{
+  "name": "@gliner25/adapter",
+  "version": "0.1.0",
+  "description": "GLiNER2.5 ONNX runtime + Weightlift adapter: entities, classification, long docs. Zero deps.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Pastel-Cloud OÜ",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pastel-Org/gliner2.5-onnx-webgpu.git",
+    "directory": "packages/gliner25"
+  },
+  "keywords": [
+    "gliner",
+    "gliner2",
+    "gliner2.5",
+    "ner",
+    "onnx",
+    "webgpu",
+    "weightlift",
+    "information-extraction",
+    "browser"
+  ],
+  "files": [
+    "src",
+    "pastel-clay",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/api.mjs",
+    "./weightlift": "./src/weightlift.mjs",
+    "./runtime": "./src/gliner-boundary.mjs",
+    "./pastel-clay": "./pastel-clay/tokens.css",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false
+}

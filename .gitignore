@@ -1,8 +1,10 @@
 .DS_Store
 *.log
 node_modules/
+_site/
 output*/
 .venv*/
 __pycache__/
 *.pyc
+*.tgz
 

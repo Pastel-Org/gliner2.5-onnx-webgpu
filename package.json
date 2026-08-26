@@ -2,14 +2,13 @@
   "name": "gliner2.5-onnx-webgpu",
   "private": true,
   "type": "module",
-  "description": "GLiNER2.5 ONNX WebGPU runtime, Weightlift adapter, and demo",
   "license": "MIT",
-  "dependencies": {
-    "weightlift": "0.2.1",
-    "onnxruntime-web": "1.26.0",
-    "@huggingface/transformers": "4.2.0"
-  },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "check": "node --check src/gliner-boundary.mjs && node --check src/api.mjs && node --check src/weightlift.mjs"
+    "build": "node scripts/build-demo.mjs",
+    "check": "node --check packages/gliner25/src/gliner-boundary.mjs && node --check packages/gliner25/src/api.mjs && node --check packages/gliner25/src/weightlift.mjs && node --check apps/demo/demo-presets.mjs && node --check scripts/build-demo.mjs",
+    "publish:check": "cd packages/gliner25 && npm pack --dry-run"
   }
 }
