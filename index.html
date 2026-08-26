@@ -165,9 +165,9 @@
       <div>
         <label for="model">Model</label>
         <select id="model">
-          <option value="small" selected>small · 74M · English · 272 MB</option>
-          <option value="base">base · 194M · English · 705 MB</option>
-          <option value="multi">multi · 287M · multilingual · 1.1 GB</option>
+          <option value="small" selected>small · 74M · English · 288 MB</option>
+          <option value="base">base · 194M · English · 746 MB</option>
+          <option value="multi">multi · 287M · multilingual · 1.12 GB</option>
         </select>
       </div>
       <div class="narrow">
@@ -459,6 +459,21 @@
 
       setStatus(`Running on ${deviceLabel.value}…`);
       const t0 = performance.now();
+      if (preset?.view === "classify") {
+        const task = preset.task || "label";
+        const result = await gliner.classify_text(text, task, labels, { threshold });
+        const dt = performance.now() - t0;
+        el.output.textContent = `${task}: ${result[task].label} (${result[task].score.toFixed(3)})`;
+        el.extra.innerHTML = "";
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(result, null, 2);
+        el.extra.appendChild(pre);
+        el.raw.textContent = JSON.stringify(result, null, 2);
+        el.legend.innerHTML = "";
+        el.stats.innerHTML = `classify · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b>`;
+        setStatus("Done.");
+        return;
+      }
       let entities;
       if (preset?.chunkSize) {
         entities = await gliner.extractLong(text, labels, { ...opts, chunkSize: preset.chunkSize, chunkOverlap: preset.chunkOverlap || 16 });

@@ -16,39 +16,45 @@ Requires a browser with `navigator.gpu` (Chrome/Edge 113+, Safari 26+ tech previ
 
 ## What this is
 
-The `gliner2.5-{small,base,multi}-v1-onnx` exports are **boundary-architecture** ONNX graphs that include the full candidate path: the DeBERTa encoder, the sparse proposer, the shared document candidate pool, and the **pair reranker**. The graph emits boundary marginals `start_logits` / `end_logits` `[B, Q, L+1]` plus reranked candidates `pair_indices [B,Q,C,2]`, `pair_logits [B,Q,C]`, `pair_valid [B,Q,C]` (C = 192). Everything else — word splitting, entity-schema packing, subword routing, span decode — is host-side and implemented in this repo (~500 lines of dependency-free JavaScript, clean-room reimplemented from the [fastino-ai/GLiNER2](https://github.com/fastino-ai/GLiNER2) Apache-2.0 reference):
+The `gliner2.5-{small,base,multi}-v1-onnx` exports are **revision 3** boundary
+graphs: DeBERTa encoder, sparse proposer, pair reranker, **classification MLP**,
+and cached `text_states`. One encoder pass. Host packing and decode live here
+(clean-room from [fastino-ai/GLiNER2](https://github.com/fastino-ai/GLiNER2), Apache-2.0).
 
 ```text
-words ──▶ schema pack: ( [P] parent ( [E] label … ) ) [SEP_TEXT] words
-      ──▶ ONNX (int64 feeds, first-subword routing, [E]-marker queries)
-      ──▶ decode: sigmoid(pair_logits / pair_temperature) → threshold
-              → dedupe (start,end) → interval-scheduling spans
-      ──▶ char-offset entities {label, text, start, end, score}
+words ──▶ schema pack: ( [P] parent ( [E]|[C] label … ) ) [SEP_TEXT] words
+      ──▶ ONNX
+      ──▶ entities: sigmoid(pair_logits) → threshold → spans
+      ──▶ classify: sigmoid(cls_logits) → argmax / threshold
 ```
 
-`parent` defaults to `entities`. Structure-field extraction uses the same `[E]` queries with a different parent (`product`, `contact`, …). Optional `[DESCRIPTION]` strings fold into the parent token the way Python `_transform_schema` does.
+Load via [weightlift](https://weightlift.dev) `ModelManager` + `glinerModel()`
+in this package. Demo pins `weightlift@0.2.1` on jsDelivr (same version as
+`package.json`) because Cloudflare Pages direct-upload does not honor
+`.gitignore`; do not put `node_modules` in this directory.
 
-Verified: JavaScript decode of these graphs matches the Python `AutoExtractor` pipeline's confidences to 4 decimals on all three checkpoints (recorded per model in each HF model card).
-
-**Not in this graph:** document classification (`[C]`), constrained classification, JointIE / `extract_relations` (`[R]`), record-mode JSON instance formation, span-attribute heads. Those live in the Python library. The demo page still loads every README example; blocked tasks fall back to the entity layer and say so.
+**Still not in the graph:** JointIE / `extract_relations` (`[R]`), record-mode
+JSON, constrained `implies`/`excludes` (those last are JS when we add them),
+span-attribute rescoring. `text_states` is exported so those heads do not need
+a second encoder later.
 
 ## Files
 
 - `index.html` — demo (weightlift ModelManager + Fastino templates)
-- `src/gliner-boundary.mjs` — packing, v2 decode, long-document chunking
-- `src/api.mjs` — AutoExtractor-shaped JS API (`extract_entities`, `extract_json`, …)
-- `src/weightlift.mjs` — `glinerModel()` weightlift adapter
+- `src/gliner-boundary.mjs` — packing, v2/v3 decode, classify, long-doc
+- `src/api.mjs` — AutoExtractor-shaped JS API
+- `src/weightlift.mjs` — `glinerModel()` adapter
 - `src/demo-presets.mjs` — Fastino README/tutorial/blog examples
-- `PROGRAM.md` — fused-graph + JS-decode + weightlift plan
-- `export_v3_cls.py` — classifier + cached `text_states` (not uploaded yet)
+- `PROGRAM.md` — remaining heads (relations, records)
+- `export_v3_cls.py` / `upload_v3_models.py`
 
 ## Models
 
-| Model | Params | Size | Languages |
+| Model | Params | ONNX | Languages |
 |---|---|---|---|
-| [gliner2.5-small-v1-onnx](https://huggingface.co/nicolasembleton/gliner2.5-small-v1-onnx) | 74M | 272 MB | English |
-| [gliner2.5-base-v1-onnx](https://huggingface.co/nicolasembleton/gliner2.5-base-v1-onnx) | 194M | 705 MB | English |
-| [gliner2.5-multi-v1-onnx](https://huggingface.co/nicolasembleton/gliner2.5-multi-v1-onnx) | 287M | 1.1 GB | Multilingual |
+| [gliner2.5-small-v1-onnx](https://huggingface.co/nicolasembleton/gliner2.5-small-v1-onnx) | 74M | 288 MB | English |
+| [gliner2.5-base-v1-onnx](https://huggingface.co/nicolasembleton/gliner2.5-base-v1-onnx) | 194M | 746 MB | English |
+| [gliner2.5-multi-v1-onnx](https://huggingface.co/nicolasembleton/gliner2.5-multi-v1-onnx) | 287M | 1.12 GB | Multilingual |
 
 ## Using the runtime in your own page
 

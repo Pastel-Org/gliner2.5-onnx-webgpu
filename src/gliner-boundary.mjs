@@ -103,27 +103,36 @@ export function buildEntitiesSchemaTokens(labels, { parent = "entities", descrip
   return tokens;
 }
 
+export function buildClassificationSchemaTokens(task, labels, { descriptions } = {}) {
+  let prompt = task;
+  if (descriptions) {
+    for (const label of labels) {
+      const desc = descriptions[label];
+      if (desc) prompt += ` [DESCRIPTION] ${label}: ${desc}`;
+    }
+  }
+  const tokens = ["(", "[P]", prompt, "("];
+  for (const label of labels) tokens.push("[C]", label);
+  tokens.push(")", ")");
+  return tokens;
+}
+
 /**
  * Pack schema + text into input_ids and routing indices
  * (upstream _format_input_with_mapping):
- * - combined = schemaTokens + [SEP_TEXT] + textWords, each combined token
- *   subword-tokenized independently
- * - text word i -> position of its FIRST subword (token_pooling="first")
- * - query q -> the q-th "[E]" marker SLOT (positional schema indices 4,6,8…,
- *   never matched by label content)
- *
- * @param {(token: string) => number[]} tokenize  subword ids for one token
+ * - combined = schemaTokens + [SEP_TEXT] + textWords
+ * - text word i -> first subword
+ * - [E] markers -> query_marker_indices
+ * - [C] markers -> cls_marker_indices
  */
 export function packInput(tokenize, schemaTokens, textWords) {
   const combined = [...schemaTokens, "[SEP_TEXT]", ...textWords];
   const schemaLen = schemaTokens.length;
 
-  const markerSlots = new Set([1]);
-  for (let i = 4; i < schemaLen - 2; i += 2) markerSlots.add(i);
-
   const inputIds = [];
   const textWordFirstPositions = [];
   const queryMarkerPositions = [];
+  const clsMarkerPositions = [];
   let lastTextWordIndex = -1;
 
   for (let i = 0; i < combined.length; i++) {
@@ -132,9 +141,10 @@ export function packInput(tokenize, schemaTokens, textWords) {
     const subTokens = tokenize(token);
 
     if (i < schemaLen) {
-      if (markerSlots.has(i) && i >= 4) queryMarkerPositions.push(subwordPos);
+      if (token === "[E]") queryMarkerPositions.push(subwordPos);
+      if (token === "[C]") clsMarkerPositions.push(subwordPos);
     } else if (i === schemaLen) {
-      // [SEP_TEXT]: contributes ids, no routing
+      // [SEP_TEXT]
     } else {
       const wordIndex = i - (schemaLen + 1);
       if (wordIndex !== lastTextWordIndex) {
@@ -144,7 +154,7 @@ export function packInput(tokenize, schemaTokens, textWords) {
     }
     for (const id of subTokens) inputIds.push(id);
   }
-  return { inputIds, textWordFirstPositions, queryMarkerPositions };
+  return { inputIds, textWordFirstPositions, queryMarkerPositions, clsMarkerPositions };
 }
 
 /** Numerically stable sigmoid. */
@@ -303,6 +313,8 @@ export class GlinerBoundaryRuntime {
     this.tokenize = tokenize;
     this.pairTemperature = pairTemperature;
     this._cache = new Map();
+    this.inputNames = new Set((session.inputNames || []).map(String));
+    this.outputNames = new Set((session.outputNames || []).map(String));
   }
 
   /** Cached subword ids for one combined token. */
@@ -320,15 +332,20 @@ export class GlinerBoundaryRuntime {
    * Run the encoder; return everything needed to decode spans (lets callers
    * sweep thresholds without re-running inference).
    */
-  async computeMarginals(text, labels, { maxWords = 3800, parent = "entities", descriptions } = {}) {
+  async computeMarginals(text, labels, {
+    maxWords = 3800, parent = "entities", descriptions,
+    schemaKind = "entities", clsTask = "label",
+  } = {}) {
     const normalized = normalizeText(text);
     const words = splitWords(normalized).slice(0, maxWords);
     if (words.length === 0) {
       return { normalized: "", words: [], labels, startLogits: null, endLogits: null };
     }
 
-    const schemaTokens = buildEntitiesSchemaTokens(labels, { parent, descriptions });
-    const { inputIds, textWordFirstPositions, queryMarkerPositions } = packInput(
+    const schemaTokens = schemaKind === "classification"
+      ? buildClassificationSchemaTokens(clsTask, labels, { descriptions })
+      : buildEntitiesSchemaTokens(labels, { parent, descriptions });
+    const { inputIds, textWordFirstPositions, queryMarkerPositions, clsMarkerPositions } = packInput(
       (t) => this._tokenize(t),
       schemaTokens,
       words.map((w) => w.text),
@@ -336,8 +353,14 @@ export class GlinerBoundaryRuntime {
 
     const T = inputIds.length;
     const L = words.length;
-    const Q = queryMarkerPositions.length;
-    if (Q !== labels.length) {
+    let Q = queryMarkerPositions.length;
+    let queryIdx = queryMarkerPositions;
+    let queryMask = Array.from({ length: Q }, () => 1);
+    if (Q === 0) {
+      Q = 1;
+      queryIdx = [0];
+      queryMask = [0];
+    } else if (schemaKind !== "classification" && Q !== labels.length) {
       throw new Error(`query routing mismatch: ${Q} markers for ${labels.length} labels`);
     }
 
@@ -346,13 +369,29 @@ export class GlinerBoundaryRuntime {
       attention_mask: new this.ort.Tensor("int64", BigInt64Array.from({ length: T }, () => 1n), [1, T]),
       text_word_indices: new this.ort.Tensor("int64", BigInt64Array.from(textWordFirstPositions.map(BigInt)), [1, L]),
       text_word_mask: new this.ort.Tensor("float32", Float32Array.from({ length: L }, () => 1), [1, L]),
-      query_marker_indices: new this.ort.Tensor("int64", BigInt64Array.from(queryMarkerPositions.map(BigInt)), [1, Q]),
-      query_marker_mask: new this.ort.Tensor("float32", Float32Array.from({ length: Q }, () => 1), [1, Q]),
+      query_marker_indices: new this.ort.Tensor("int64", BigInt64Array.from(queryIdx.map(BigInt)), [1, Q]),
+      query_marker_mask: new this.ort.Tensor("float32", Float32Array.from(queryMask), [1, Q]),
     };
 
+    if (this.inputNames.has("cls_marker_indices")) {
+      let K = clsMarkerPositions.length;
+      let clsIdx = clsMarkerPositions;
+      let clsMask = Array.from({ length: K }, () => 1);
+      if (K === 0) {
+        K = 1;
+        clsIdx = [0];
+        clsMask = [0];
+      }
+      feeds.cls_marker_indices = new this.ort.Tensor("int64", BigInt64Array.from(clsIdx.map(BigInt)), [1, K]);
+      feeds.cls_marker_mask = new this.ort.Tensor("float32", Float32Array.from(clsMask), [1, K]);
+    }
+
     const results = await this.session.run(feeds);
+    const clsLogits = results.cls_logits
+      ? Array.from(results.cls_logits.data).slice(0, Math.max(clsMarkerPositions.length, 0))
+      : null;
+    const textStates = results.text_states ?? null;
     if (results.pair_logits) {
-      // v2 graph: proposer + shared pool + pair reranker ran in-graph.
       return {
         normalized,
         words,
@@ -364,6 +403,8 @@ export class GlinerBoundaryRuntime {
         pairValid: results.pair_valid.data,
         candidateCount: results.pair_logits.dims[2],
         pairTemperature: this.pairTemperature,
+        clsLogits,
+        textStates,
       };
     }
     return {
@@ -372,7 +413,31 @@ export class GlinerBoundaryRuntime {
       labels,
       startLogits: results.start_logits.data,
       endLogits: results.end_logits.data,
+      clsLogits,
+      textStates,
     };
+  }
+
+  async classify(text, task, labels, { threshold = 0.5, multiLabel = false, descriptions } = {}) {
+    if (!this.outputNames.has("cls_logits")) {
+      const err = new Error("session has no cls_logits (need v3 export)");
+      err.code = "GLINER_HEAD_MISSING";
+      throw err;
+    }
+    const marg = await this.computeMarginals(text, labels, {
+      schemaKind: "classification",
+      clsTask: task,
+      descriptions,
+    });
+    const scores = (marg.clsLogits || []).map((x) => sigmoid(x));
+    if (multiLabel) {
+      return labels
+        .map((label, i) => ({ label, score: scores[i] ?? 0 }))
+        .filter((x) => x.score >= threshold);
+    }
+    let best = 0;
+    for (let i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
+    return { label: labels[best], score: scores[best] ?? 0, scores: Object.fromEntries(labels.map((l, i) => [l, scores[i] ?? 0])) };
   }
 
   /**

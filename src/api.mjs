@@ -160,14 +160,34 @@ export class Gliner25 {
     return result;
   }
 
-  async classify_text(_text, _task) {
+  async classify_text(text, taskOrMap, labelsMaybe, opts = {}) {
     if (!this.hasClassifier) {
       const err = new Error("classify_text needs a v3 graph (cls_logits). This session is entity-only.");
       err.code = "GLINER_HEAD_MISSING";
       err.head = "classification";
       throw err;
     }
-    throw new Error("classify_text decode not wired yet");
+    let tasks;
+    if (typeof taskOrMap === "string") {
+      tasks = { [taskOrMap]: { labels: labelsMaybe, ...opts } };
+    } else {
+      tasks = {};
+      for (const [name, spec] of Object.entries(taskOrMap)) {
+        tasks[name] = Array.isArray(spec) ? { labels: spec } : spec;
+      }
+    }
+    const out = {};
+    for (const [name, spec] of Object.entries(tasks)) {
+      const labels = spec.labels || spec;
+      const multi = Boolean(spec.multi_label ?? spec.multiLabel);
+      const threshold = spec.threshold ?? opts.threshold ?? 0.5;
+      out[name] = await this.rt.classify(text, name, labels, {
+        threshold,
+        multiLabel: multi,
+        descriptions: spec.descriptions,
+      });
+    }
+    return out;
   }
 
   async extract_relations(_text, _types) {
