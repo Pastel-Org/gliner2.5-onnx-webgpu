@@ -109,7 +109,7 @@ export function glinerModel({
 
         let attrsSession = null;
         try {
-          const attrsUrl = hfFileUrl(meta.repo, "onnx/attrs.onnx") + "?v=5";
+          const attrsUrl = hfFileUrl(meta.repo, "onnx/attrs.onnx") + "?v=6";
           progress.dispatch({ type: "initiate", file: "onnx/attrs.onnx" });
           const attrsBytes = await downloadModel(attrsUrl);
           progress.dispatch({ type: "done", file: "onnx/attrs.onnx" });

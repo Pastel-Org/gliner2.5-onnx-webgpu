@@ -645,7 +645,7 @@
         const dt = performance.now() - t0;
         renderHighlight(text, ents);
         el.extra.innerHTML = ents.map((e) =>
-          `<div class="node">${escapeHtml(e.text)} <b>${escapeHtml(e.attribute || "—")}</b>${e.attributeScore != null ? " " + e.attributeScore.toFixed(3) : ""}</div>`
+          `<div class="node">${escapeHtml(e.text)} <b>${escapeHtml(e.attribute || "—")}</b>${e.attributeScore != null ? " " + e.attributeScore.toFixed(3) : ""}${e._attrsPath ? " · " + escapeHtml(e._attrsPath) : ""}</div>`
         ).join("");
         el.raw.textContent = JSON.stringify(ents, null, 2);
         el.legend.innerHTML = "";

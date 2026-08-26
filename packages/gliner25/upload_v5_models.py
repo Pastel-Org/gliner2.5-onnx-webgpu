@@ -50,6 +50,7 @@ Host packing and decode: [Pastel-Org/gliner2.5-onnx-webgpu](https://github.com/P
 | `onnx/model.onnx` | Encoder + entity pair path + classifier + `text_states` + `candidate_states` | {model_mb:.1f} MB |
 | `onnx/heads.onnx` | `SparseRelationScorer` only (no encoder) | {heads_mb:.1f} MB |
 | `onnx/records.onnx` | RecordHead assignment (inst/field/cand projections + null column) | {records_mb:.2f} MB |
+| `onnx/attrs.onnx` | `score_explicit_spans` (dynamo; pad 512/8/16) | ~2.56 MB |
 
 ## model.onnx outputs (new in v5)
 
@@ -64,12 +65,15 @@ Outputs: `assign_logits [B,N,F,1+C]` (col 0 is ABSENT), `object_logits`,
 `latent_logits`. Natural mode seeds instances from the first `::str` field's
 candidates above threshold.
 
+## attrs.onnx
+
+`score_explicit_spans` via the torch dynamo exporter. Traced at 512 words,
+8 attribute queries, 16 spans. JS pads to those caps. ORT RMSE ~1e-6.
+
 ## Still not in ONNX
 
-`score_explicit_spans` (pair-reranker broadcast does not export). The demo
-attaches attributes by looking up the same `(start,end)` on attribute `[E]`
-queries. Full Kleene classification AST is not ported; README `implies` /
-`excludes` is a JS beam.
+Full Kleene classification AST is not ported; README `implies` / `excludes`
+is a JS beam. Latent / anchorless records are not exported.
 
 ## Credits
 

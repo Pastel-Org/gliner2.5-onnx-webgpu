@@ -53,7 +53,7 @@ export const GROUPS = [
   {
     id: "Attributes",
     title: "Span attributes",
-    blurb: "Python scores attributes on kept spans. ONNX export of that path still fails; the page looks up the same (start,end) on attribute [E] queries.",
+    blurb: "Python scores attributes on kept spans. attrs.onnx is that path (dynamo export, pad 512/8/16). Overlay lookup only if the graph is missing.",
   },
 ];
 
@@ -381,7 +381,7 @@ export const PRESETS = [
     view: "attributes",
     labels: "product",
     attributeLabels: "positive, negative, neutral",
-    note: "Entities first, then score_explicit_spans on those (start,end) against attribute queries.",
+    note: "Entities first, then attrs.onnx scores those (start,end) against attribute queries. Pad 512/8/16.",
     text: "The iPhone camera is stunning but the battery life is disappointing, while the speakers are fine.",
   },
 ];

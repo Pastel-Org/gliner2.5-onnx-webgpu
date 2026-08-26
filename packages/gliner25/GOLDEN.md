@@ -28,4 +28,4 @@ Three instances. Dosage and frequency empty on all. Names are long/low-score exc
 ## attr-product
 
 One product: “iPhone camera” 0.903 with sentiment **negative 0.592**.
-`score_explicit_spans` still does not export (`Expand` invalid in ORT). JS overlay is not this path.
+JS now runs `attrs.onnx` (`score_explicit_spans`, dynamo, pad 512/8/16). Overlay is the fallback only.

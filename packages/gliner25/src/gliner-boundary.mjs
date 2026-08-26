@@ -548,42 +548,51 @@ export class GlinerBoundaryRuntime {
   async scoreExplicitAttributes(text, entities, attrLabels) {
     if (!this.attrsSession) return entities;
     const marg = await this.computeMarginals(text, attrLabels, { parent: "attributes" });
-    const qstates = marg.queryStates || marg.textStates;
-    if (!qstates || !marg.textStates) return entities;
+    if (!marg.queryStates || !marg.textStates) return entities;
+    // Dynamo graph is traced at these pads (legacy tracer broke unsqueeze).
+    const PAD_L = 512;
+    const PAD_Q = 8;
+    const PAD_C = 16;
     const L = marg.textStates.dims[1];
     const H = marg.textStates.dims[2];
-    const Q = attrLabels.length;
-    const C = Math.max(entities.length, 1);
-    const indices = new BigInt64Array(Q * C * 2);
-    for (let q = 0; q < Q; q++) {
-      for (let c = 0; c < C; c++) {
-        const e = entities[c] || entities[0];
-        const off = (q * C + c) * 2;
-        indices[off] = BigInt(e.wordStart ?? 0);
-        indices[off + 1] = BigInt(e.wordEnd ?? 1);
+    const Q = Math.min(attrLabels.length, PAD_Q);
+    const C = Math.min(Math.max(entities.length, 1), PAD_C);
+    const ts = new Float32Array(PAD_L * H);
+    ts.set(marg.textStates.data.subarray(0, Math.min(L, PAD_L) * H));
+    const qs = new Float32Array(PAD_Q * H);
+    qs.set(marg.queryStates.data.subarray(0, Q * H));
+    const mask = new Float32Array(PAD_L);
+    mask.fill(1, 0, Math.min(L, PAD_L));
+    const qmask = new Float32Array(PAD_Q);
+    qmask.fill(1, 0, Q);
+    const indices = new BigInt64Array(PAD_Q * PAD_C * 2);
+    for (let q = 0; q < PAD_Q; q++) {
+      for (let c = 0; c < PAD_C; c++) {
+        const e = entities[Math.min(c, Math.max(entities.length - 1, 0))] || { wordStart: 0, wordEnd: 1 };
+        const off = (q * PAD_C + c) * 2;
+        indices[off] = BigInt(Math.min(e.wordStart ?? 0, PAD_L - 1));
+        indices[off + 1] = BigInt(Math.min(Math.max(e.wordEnd ?? 1, 1), PAD_L));
       }
     }
-    const mask = new Float32Array(L).fill(1);
-    const qmask = new Float32Array(Q).fill(1);
     const feeds = {
-      text_states: marg.textStates,
-      text_word_mask: new this.ort.Tensor("float32", mask, [1, L]),
-      query_states: marg.queryStates,
-      query_marker_mask: new this.ort.Tensor("float32", qmask, [1, Q]),
-      span_indices: new this.ort.Tensor("int64", indices, [1, Q, C, 2]),
+      text_states: new this.ort.Tensor("float32", ts, [1, PAD_L, H]),
+      text_word_mask: new this.ort.Tensor("float32", mask, [1, PAD_L]),
+      query_states: new this.ort.Tensor("float32", qs, [1, PAD_Q, H]),
+      query_marker_mask: new this.ort.Tensor("float32", qmask, [1, PAD_Q]),
+      span_indices: new this.ort.Tensor("int64", indices, [1, PAD_Q, PAD_C, 2]),
     };
-    if (!marg.queryStates) return entities;
     const out = await this.attrsSession.run(feeds);
     const logits = out.attr_logits.data;
-    for (let c = 0; c < entities.length; c++) {
+    for (let c = 0; c < entities.length && c < PAD_C; c++) {
       let best = 0;
       let bestV = -1e9;
       for (let q = 0; q < Q; q++) {
-        const v = logits[q * C + c];
+        const v = logits[q * PAD_C + c];
         if (v > bestV) { bestV = v; best = q; }
       }
       entities[c].attribute = attrLabels[best];
       entities[c].attributeScore = sigmoid(bestV);
+      entities[c]._attrsPath = "score_explicit_spans";
     }
     return entities;
   }
