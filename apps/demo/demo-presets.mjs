@@ -23,7 +23,7 @@ export const GROUPS = [
   {
     id: "Records",
     title: "Repeated records",
-    blurb: "Host assignment: the i-th mention of each field becomes one object. Not the neural RecordHead.",
+    blurb: "Natural RecordHead: first declared field seeds instances; records.onnx assigns the rest. Same messy fields as Python.",
   },
   {
     id: "Relations",
@@ -53,7 +53,7 @@ export const GROUPS = [
   {
     id: "Attributes",
     title: "Span attributes",
-    blurb: "Python scores attributes on kept spans. Here they are extra [E] labels overlaid by overlap.",
+    blurb: "Python scores attributes on kept spans. ONNX export of that path still fails; the page looks up the same (start,end) on attribute [E] queries.",
   },
 ];
 

@@ -596,8 +596,7 @@ export class GlinerBoundaryRuntime {
     const cs = marg.candidateStates.data;
     const qs = marg.queryStates.data;
     const temp = marg.pairTemperature || 1;
-    let anchor = parsed.findIndex((p) => p.dtype === "list");
-    if (anchor < 0) anchor = parsed.findIndex((p) => p.dtype === "str");
+    let anchor = parsed.findIndex((p) => p.anchor);
     if (anchor < 0) anchor = 0;
     const raw = [];
     for (let c = 0; c < C; c++) {
@@ -610,15 +609,11 @@ export class GlinerBoundaryRuntime {
     }
     raw.sort((a, b) => b.p - a.p);
     const instSlots = [];
-    const kept = [];
-    const seedThreshold = Math.max(threshold, 0.7);
+    const seedThreshold = threshold;
     for (const sp of raw) {
       if (sp.p < seedThreshold) continue;
-      if (kept.some((k) => !(sp.e <= k.s || k.e <= sp.s))) continue;
       if (sp.s >= sp.e || sp.s < 0 || sp.e > marg.words.length) continue;
-      kept.push(sp);
       instSlots.push(sp.c);
-      if (instSlots.length >= 8) break;
     }
     if (!instSlots.length) return null;
     const N = instSlots.length;

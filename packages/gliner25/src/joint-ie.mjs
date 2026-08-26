@@ -24,7 +24,7 @@ function mentionFromSpan(label, s, e, score, wordOffsets, text) {
  * Python TypedRelationPairGenerator uses argument_threshold 0.2 on these.
  */
 export function collectLatticeMentions(marg, {
-  argumentThreshold = 0.2,
+  argumentThreshold = 0.0,
   pairTemperature = 1.0,
 } = {}) {
   const { pairIndices, pairLogits, pairValid, candidateCount, labels, words, normalized } = marg;
@@ -54,7 +54,7 @@ export function collectLatticeMentions(marg, {
 export function proposeRelationPairs(mentions, relationTypes, {
   headsPerType = 32,
   tailsPerType = 32,
-  pairCap = 64,
+  pairCap = 128,
 } = {}) {
   const types = Object.entries(relationTypes);
   const pairs = [];
@@ -62,14 +62,13 @@ export function proposeRelationPairs(mentions, relationTypes, {
     const headLabs = new Set(spec.head || spec.heads || []);
     const tailLabs = new Set(spec.tail || spec.tails || []);
     const allowSelf = Boolean(spec.allowSelf ?? spec.allow_self);
-    const heads = mentions
-      .filter((e) => headLabs.has(e.label))
+    const rankArgs = (list, cap) => list
+      .slice()
+      .sort((a, b) => (a.wordEnd - b.wordEnd) || (a.wordStart - b.wordStart))
       .sort((a, b) => b.score - a.score)
-      .slice(0, headsPerType);
-    const tails = mentions
-      .filter((e) => tailLabs.has(e.label))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, tailsPerType);
+      .slice(0, cap);
+    const heads = rankArgs(mentions.filter((e) => headLabs.has(e.label)), headsPerType);
+    const tails = rankArgs(mentions.filter((e) => tailLabs.has(e.label)), tailsPerType);
     const local = [];
     for (const h of heads) {
       for (const t of tails) {
@@ -87,7 +86,7 @@ export function proposeRelationPairs(mentions, relationTypes, {
         });
       }
     }
-    local.sort((a, b) => (b.head.score + b.tail.score) - (a.head.score + a.tail.score));
+    local.sort((a, b) => (b.head.score * b.tail.score) - (a.head.score * a.tail.score));
     pairs.push(...local.slice(0, pairCap));
   });
   return pairs;
@@ -274,6 +273,21 @@ export function decodeAssignedRecords({
       }
     }
     recs.push(rec);
+  }
+  for (const p of parsed) {
+    const seen = new Set();
+    for (const rec of recs) {
+      const val = rec[p.name];
+      const items = Array.isArray(val) ? val : (val == null ? [] : [val]);
+      const kept = [];
+      for (const item of items) {
+        const key = typeof item === "string" ? item.toLowerCase() : `${item.start}-${item.end}-${String(item.text || "").toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        kept.push(item);
+      }
+      rec[p.name] = Array.isArray(val) ? kept : (kept[0] ?? null);
+    }
   }
   return { [parent]: recs };
 }

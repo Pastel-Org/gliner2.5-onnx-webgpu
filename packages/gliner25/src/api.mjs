@@ -260,38 +260,37 @@ export class Gliner25 {
     const entityLabels = labels || [...new Set(
       Object.values(types).flatMap((s) => [...(s.head || s.heads || []), ...(s.tail || s.tails || [])]),
     )];
-    const margEnt = await this.rt.computeMarginals(text, entityLabels);
+    const marg = await this.rt.computeMarginals(text, entityLabels, { relations: types });
     let entities;
-    if (margEnt.pairLogits) {
+    if (marg.pairLogits) {
       entities = decodeEntitiesV2({
-        pairIndices: margEnt.pairIndices,
-        pairLogits: margEnt.pairLogits,
-        pairValid: margEnt.pairValid,
-        candidateCount: margEnt.candidateCount,
-        labels: margEnt.labels,
-        wordOffsets: margEnt.words,
-        text: margEnt.normalized,
+        pairIndices: marg.pairIndices,
+        pairLogits: marg.pairLogits,
+        pairValid: marg.pairValid,
+        candidateCount: marg.candidateCount,
+        labels: marg.labels,
+        wordOffsets: marg.words,
+        text: marg.normalized,
         threshold,
-        pairTemperature: margEnt.pairTemperature,
+        pairTemperature: marg.pairTemperature,
       });
     } else {
       entities = decodeEntities({
-        startLogits: margEnt.startLogits,
-        endLogits: margEnt.endLogits,
-        wordCount: margEnt.words.length,
-        labels: margEnt.labels,
-        wordOffsets: margEnt.words,
-        text: margEnt.normalized,
+        startLogits: marg.startLogits,
+        endLogits: marg.endLogits,
+        wordCount: marg.words.length,
+        labels: marg.labels,
+        wordOffsets: marg.words,
+        text: marg.normalized,
         threshold,
       });
     }
-    const mentions = collectLatticeMentions(margEnt, {
-      argumentThreshold: 0.2,
-      pairTemperature: margEnt.pairTemperature ?? 1,
+    const mentions = collectLatticeMentions(marg, {
+      argumentThreshold: 0.0,
+      pairTemperature: marg.pairTemperature ?? 1,
     });
-    const margRel = await this.rt.computeMarginals(text, entityLabels, { relations: types });
     const pairs = proposeRelationPairs(mentions, types);
-    const scored = await this.rt.scoreRelations(margRel, pairs);
+    const scored = await this.rt.scoreRelations(marg, pairs);
     const joint = beamSearchRelations(scored, { threshold });
     return {
       entities: toEntityMap(entities, { includeConfidence: include_confidence, includeSpans: true }),
