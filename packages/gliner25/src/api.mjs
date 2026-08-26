@@ -5,7 +5,7 @@
  * field-as-label JSON, and (later) classification / JointIE beam live here.
  */
 
-import { GlinerBoundaryRuntime, GLINER_MODELS, hfFileUrl, downloadModel, decodeEntitiesV2, decodeEntities } from "./gliner-boundary.mjs";
+import { GlinerBoundaryRuntime, GLINER_MODELS, hfFileUrl, downloadModel } from "./gliner-boundary.mjs";
 import { proposeRelationPairs, beamSearchRelations, zipRecords } from "./joint-ie.mjs";
 
 export { GLINER_MODELS, hfFileUrl, downloadModel };
