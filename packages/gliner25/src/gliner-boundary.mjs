@@ -611,10 +611,14 @@ export class GlinerBoundaryRuntime {
     raw.sort((a, b) => b.p - a.p);
     const instSlots = [];
     const kept = [];
+    const seedThreshold = Math.max(threshold, 0.7);
     for (const sp of raw) {
+      if (sp.p < seedThreshold) continue;
       if (kept.some((k) => !(sp.e <= k.s || k.e <= sp.s))) continue;
+      if (sp.s >= sp.e || sp.s < 0 || sp.e > marg.words.length) continue;
       kept.push(sp);
       instSlots.push(sp.c);
+      if (instSlots.length >= 8) break;
     }
     if (!instSlots.length) return null;
     const N = instSlots.length;
