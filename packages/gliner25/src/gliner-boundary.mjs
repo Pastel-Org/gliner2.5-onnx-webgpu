@@ -306,10 +306,13 @@ export function decodeEntities({ startLogits, endLogits, wordCount, labels, word
 export function decodeEntitiesV2({
   pairIndices, pairLogits, pairValid, candidateCount,
   labels, wordOffsets, text, threshold = 0.5, pairTemperature = 1.0,
+  startLogits = null, endLogits = null, alsoMarginalSpans = false,
 }) {
   const Q = labels.length;
   const C = candidateCount;
   const entities = [];
+  const L = wordOffsets.length;
+  const stride = L + 1;
   for (let q = 0; q < Q; q++) {
     const seen = new Map();
     for (let c = 0; c < C; c++) {
@@ -319,6 +322,20 @@ export function decodeEntitiesV2({
       const p = sigmoid(pairLogits[q * C + c] / pairTemperature);
       const key = `${s},${e}`;
       if (!seen.has(key) || p > seen.get(key).p) seen.set(key, { s, e, p });
+    }
+    if (alsoMarginalSpans && startLogits && endLogits) {
+      for (let i = 0; i < L; i++) {
+        const ps = sigmoid(startLogits[q * stride + i]);
+        if (ps < threshold) continue;
+        for (let j = i + 1; j <= L; j++) {
+          const pe = sigmoid(endLogits[q * stride + j]);
+          if (pe < threshold) continue;
+          const p = Math.min(ps, pe);
+          if (p < threshold) continue;
+          const key = `${i},${j}`;
+          if (!seen.has(key)) seen.set(key, { s: i, e: j, p });
+        }
+      }
     }
     const spans = [...seen.values()]
       .filter(({ p }) => p >= threshold)

@@ -254,6 +254,9 @@ export class Gliner25 {
         text: marg.normalized,
         threshold,
         pairTemperature: marg.pairTemperature,
+        startLogits: marg.startLogits,
+        endLogits: marg.endLogits,
+        alsoMarginalSpans: true,
       });
     } else if (marg.startLogits) {
       entities = decodeEntities({
