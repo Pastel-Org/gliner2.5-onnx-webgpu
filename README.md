@@ -16,22 +16,27 @@ Requires a browser with `navigator.gpu` (Chrome/Edge 113+, Safari 26+ tech previ
 
 ## What this is
 
-The `gliner2.5-{small,base,multi}-v1-onnx` exports are **boundary-architecture** ONNX graphs that include the full candidate path: the DeBERTa encoder, the sparse proposer, the shared document candidate pool, and the **pair reranker**. The graph emits boundary marginals `start_logits` / `end_logits` `[B, Q, L+1]` plus reranked candidates `pair_indices [B,Q,C,2]`, `pair_logits [B,Q,C]`, `pair_valid [B,Q,C]` (C = 192). Everything else — word splitting, entity-schema packing, subword routing, span decode — is host-side and implemented in this repo (~430 lines of dependency-free JavaScript, clean-room reimplemented from the [fastino-ai/GLiNER2](https://github.com/fastino-ai/GLiNER2) Apache-2.0 reference):
+The `gliner2.5-{small,base,multi}-v1-onnx` exports are **boundary-architecture** ONNX graphs that include the full candidate path: the DeBERTa encoder, the sparse proposer, the shared document candidate pool, and the **pair reranker**. The graph emits boundary marginals `start_logits` / `end_logits` `[B, Q, L+1]` plus reranked candidates `pair_indices [B,Q,C,2]`, `pair_logits [B,Q,C]`, `pair_valid [B,Q,C]` (C = 192). Everything else — word splitting, entity-schema packing, subword routing, span decode — is host-side and implemented in this repo (~500 lines of dependency-free JavaScript, clean-room reimplemented from the [fastino-ai/GLiNER2](https://github.com/fastino-ai/GLiNER2) Apache-2.0 reference):
 
 ```text
-words ──▶ schema pack: ( [P] entities ( [E] label … ) ) [SEP_TEXT] words
+words ──▶ schema pack: ( [P] parent ( [E] label … ) ) [SEP_TEXT] words
       ──▶ ONNX (int64 feeds, first-subword routing, [E]-marker queries)
       ──▶ decode: sigmoid(pair_logits / pair_temperature) → threshold
               → dedupe (start,end) → interval-scheduling spans
       ──▶ char-offset entities {label, text, start, end, score}
 ```
 
+`parent` defaults to `entities`. Structure-field extraction uses the same `[E]` queries with a different parent (`product`, `contact`, …). Optional `[DESCRIPTION]` strings fold into the parent token the way Python `_transform_schema` does.
+
 Verified: JavaScript decode of these graphs matches the Python `AutoExtractor` pipeline's confidences to 4 decimals on all three checkpoints (recorded per model in each HF model card).
+
+**Not in this graph:** document classification (`[C]`), constrained classification, JointIE / `extract_relations` (`[R]`), record-mode JSON instance formation, span-attribute heads. Those live in the Python library. The demo page still loads every README example; blocked tasks fall back to the entity layer and say so.
 
 ## Files
 
-- `index.html` — the runnable demo (vanilla JS, CDN imports)
-- `src/gliner-boundary.mjs` — the runtime: packing, routing, decode, model registry, streaming downloader
+- `index.html` — the runnable demo (vanilla JS, CDN imports, Fastino README/tutorial/blog examples)
+- `src/gliner-boundary.mjs` — packing, routing, v2 decode, long-document chunking
+- `src/demo-presets.mjs` — example texts and labels
 
 ## Models
 

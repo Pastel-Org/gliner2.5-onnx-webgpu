@@ -10,9 +10,9 @@
  * Protocol reference: fastino-ai/GLiNER2 (Apache-2.0), gliner2/processor.py
  * and gliner2/models/boundary/*. Clean-room reimplementation in JS.
  *
- * Decode note: the export exposes boundary marginals only (no pair reranker
- * output). A span's score is min(sigmoid(start), sigmoid(end)) — a marginal
- * proxy for the upstream pair score.
+ * Decode note: v2 graphs emit pair_logits from the in-graph reranker.
+ * Span score is sigmoid(pair_logit / pair_temperature). v1 graphs fall
+ * back to min(sigmoid(start), sigmoid(end)).
  *
  * Pure ES module, no Node APIs. Pair it with any tokenizer that can encode a
  * single token to subword ids (e.g. transformers.js AutoTokenizer).
@@ -77,11 +77,25 @@ export function normalizeText(text) {
 }
 
 /**
- * Entities-only schema token layout (upstream _transform_schema, no
- * descriptions): "(" "[P]" "entities" "(" "[E]" label1 "[E]" label2 ... ")" ")"
+ * Entities / structure-field schema token layout (upstream _transform_schema).
+ * Parent is a single combined token. Optional descriptions are folded into
+ * that parent the same way Python does:
+ *   parent + " [DESCRIPTION] " + label + ": " + desc
+ * Query routing still keys off [E] marker slots at schema indices 4, 6, 8, …
+ *
+ * Structure extraction (extract_json fields) uses the same [E] queries with
+ * a different parent name (e.g. "product"). Classification ([C]) and
+ * relation ([R]) queries are a different head and are not packed here.
  */
-export function buildEntitiesSchemaTokens(labels) {
-  const tokens = ["(", "[P]", "entities", "("];
+export function buildEntitiesSchemaTokens(labels, { parent = "entities", descriptions } = {}) {
+  let prompt = parent;
+  if (descriptions) {
+    for (const label of labels) {
+      const desc = descriptions[label];
+      if (desc) prompt += ` [DESCRIPTION] ${label}: ${desc}`;
+    }
+  }
+  const tokens = ["(", "[P]", prompt, "("];
   for (const label of labels) {
     tokens.push("[E]", label);
   }
@@ -306,14 +320,14 @@ export class GlinerBoundaryRuntime {
    * Run the encoder; return everything needed to decode spans (lets callers
    * sweep thresholds without re-running inference).
    */
-  async computeMarginals(text, labels, { maxWords = 3800 } = {}) {
+  async computeMarginals(text, labels, { maxWords = 3800, parent = "entities", descriptions } = {}) {
     const normalized = normalizeText(text);
     const words = splitWords(normalized).slice(0, maxWords);
     if (words.length === 0) {
       return { normalized: "", words: [], labels, startLogits: null, endLogits: null };
     }
 
-    const schemaTokens = buildEntitiesSchemaTokens(labels);
+    const schemaTokens = buildEntitiesSchemaTokens(labels, { parent, descriptions });
     const { inputIds, textWordFirstPositions, queryMarkerPositions } = packInput(
       (t) => this._tokenize(t),
       schemaTokens,
@@ -367,8 +381,8 @@ export class GlinerBoundaryRuntime {
    * proxy decode.
    * @returns {Promise<Array<{label:string,text:string,start:number,end:number,score:number}>>}
    */
-  async extract(text, labels, { threshold = 0.5, maxWords = 3800 } = {}) {
-    const marg = await this.computeMarginals(text, labels, { maxWords });
+  async extract(text, labels, { threshold = 0.5, maxWords = 3800, parent, descriptions } = {}) {
+    const marg = await this.computeMarginals(text, labels, { maxWords, parent, descriptions });
     if (!marg.startLogits) return [];
     if (marg.pairLogits) {
       return decodeEntitiesV2({
@@ -398,8 +412,8 @@ export class GlinerBoundaryRuntime {
    * Extract entities from a v2 graph explicitly. Throws if the session does
    * not expose pair outputs (use extract() for auto-detection).
    */
-  async extractV2(text, labels, { threshold = 0.5, maxWords = 3800 } = {}) {
-    const marg = await this.computeMarginals(text, labels, { maxWords });
+  async extractV2(text, labels, { threshold = 0.5, maxWords = 3800, parent, descriptions } = {}) {
+    const marg = await this.computeMarginals(text, labels, { maxWords, parent, descriptions });
     if (!marg.pairLogits) {
       throw new Error("session is not a v2 export (no pair_logits output)");
     }
@@ -415,6 +429,67 @@ export class GlinerBoundaryRuntime {
       pairTemperature: marg.pairTemperature,
     });
   }
+
+  /**
+   * Host-side long-document scan: overlapping word chunks, remap to the
+   * original (normalized) string, merge duplicate spans per label.
+   * Mirrors extract_entities_long in the Python library.
+   */
+  async extractLong(text, labels, {
+    threshold = 0.5,
+    chunkSize = 384,
+    chunkOverlap = 64,
+    maxWords = 3800,
+    parent,
+    descriptions,
+  } = {}) {
+    const normalized = normalizeText(text);
+    const words = splitWords(normalized).slice(0, maxWords);
+    if (words.length <= chunkSize) {
+      return this.extract(normalized, labels, { threshold, maxWords, parent, descriptions });
+    }
+    const all = [];
+    for (let i = 0; i < words.length; ) {
+      const slice = words.slice(i, Math.min(i + chunkSize, words.length));
+      const origin = slice[0].start;
+      const chunk = normalized.slice(origin, slice[slice.length - 1].end);
+      const ents = await this.extract(chunk, labels, {
+        threshold,
+        maxWords: chunkSize + 8,
+        parent,
+        descriptions,
+      });
+      for (const e of ents) {
+        const start = e.start + origin;
+        const end = e.end + origin;
+        all.push({ ...e, start, end, text: normalized.slice(start, end) });
+      }
+      if (i + chunkSize >= words.length) break;
+      i += Math.max(1, chunkSize - chunkOverlap);
+    }
+    return mergeOverlappingByLabel(all);
+  }
+}
+
+/** Keep the highest-scoring span when two same-label spans overlap. */
+export function mergeOverlappingByLabel(ents) {
+  const byLabel = new Map();
+  for (const e of ents) {
+    const list = byLabel.get(e.label) ?? [];
+    list.push(e);
+    byLabel.set(e.label, list);
+  }
+  const out = [];
+  for (const group of byLabel.values()) {
+    group.sort((a, b) => b.score - a.score);
+    const kept = [];
+    for (const e of group) {
+      if (kept.some((k) => e.start < k.end && k.start < e.end)) continue;
+      kept.push(e);
+    }
+    out.push(...kept);
+  }
+  return out.sort((a, b) => a.start - b.start || b.end - a.end);
 }
 
 /**

@@ -10,7 +10,7 @@
     --card: #ffffff;
     --ink: #2d2a26;
     --muted: #8a817a;
-    --accent: #b36b4f; /* Pastel Clay terracotta */
+    --accent: #b36b4f;
     --accent-soft: #f3e3db;
     --line: #e8e0da;
     --radius: 0.625rem;
@@ -24,10 +24,10 @@
     color: var(--ink);
     line-height: 1.55;
   }
-  main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  main { max-width: 54rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
   h1 { font-size: 1.45rem; margin: 0 0 .25rem; }
   h1 span { color: var(--muted); font-weight: 400; }
-  .sub { color: var(--muted); margin: 0 0 1.75rem; font-size: .92rem; }
+  .sub { color: var(--muted); margin: 0 0 1.25rem; font-size: .92rem; }
   .sub a { color: var(--accent); text-decoration: none; }
   .sub a:hover { text-decoration: underline; }
   .card {
@@ -47,7 +47,7 @@
     border-radius: var(--radius);
     padding: .55rem .7rem;
   }
-  textarea { min-height: 6.5rem; resize: vertical; }
+  textarea { min-height: 7.5rem; resize: vertical; }
   .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: flex-end; }
   .row > div { flex: 1 1 12rem; }
   .row > .narrow { flex: 0 0 7rem; }
@@ -77,23 +77,88 @@
   .legend b { color: var(--ink); font-weight: 600; }
   .stats { font-family: var(--mono); font-size: .8rem; color: var(--muted); margin-top: .8rem; }
   .stats b { color: var(--ink); }
-  details { margin-top: 1rem; font-size: .85rem; }
-  summary { cursor: pointer; color: var(--muted); }
+  details.block { margin-top: .2rem; font-size: .88rem; }
+  details.block > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+  details.block .inner { margin-top: .7rem; color: var(--ink); }
   pre { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: .8rem; overflow-x: auto; font-size: .78rem; font-family: var(--mono); }
   footer { color: var(--muted); font-size: .8rem; margin-top: 2rem; }
   footer a { color: var(--accent); text-decoration: none; }
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .chip {
+    font: inherit;
+    font-size: .8rem;
+    font-weight: 500;
+    color: var(--ink);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: .28rem .7rem;
+    cursor: pointer;
+  }
+  .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .note {
+    font-size: .85rem;
+    color: var(--muted);
+    background: var(--bg);
+    border-left: 3px solid var(--accent);
+    padding: .55rem .75rem;
+    margin: .8rem 0 0;
+    border-radius: 0 var(--radius) var(--radius) 0;
+  }
+  table.nums { width: 100%; border-collapse: collapse; font-size: .82rem; margin-top: .6rem; }
+  table.nums th, table.nums td { text-align: right; padding: .28rem .4rem; border-bottom: 1px solid var(--line); }
+  table.nums th:first-child, table.nums td:first-child { text-align: left; }
+  .kg { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: .6rem; }
+  .kg-col { flex: 1 1 8rem; }
+  .kg-col h3 { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 .35rem; }
+  .node {
+    background: var(--accent-soft);
+    border-radius: var(--radius);
+    padding: .3rem .5rem;
+    margin-bottom: .3rem;
+    font-size: .85rem;
+  }
+  .edges { font-size: .82rem; color: var(--muted); margin-top: .5rem; }
+  .edges b { color: var(--ink); }
+  .redact { font-family: var(--mono); font-size: .9rem; white-space: pre-wrap; }
 </style>
 </head>
 <body>
 <main>
   <h1>GLiNER2.5 <span>· ONNX WebGPU</span></h1>
   <p class="sub">
-    Zero-shot NER fully in your browser. Models:
+    Span-free NER in the browser. Models:
     <a href="https://huggingface.co/nicolasembleton/gliner2.5-small-v1-onnx">small</a> ·
     <a href="https://huggingface.co/nicolasembleton/gliner2.5-base-v1-onnx">base</a> ·
-    <a href="https://huggingface.co/nicolasembleton/gliner2.5-multi-v1-onnx">multi</a>
-    — nothing leaves this page except the model download from Hugging Face.
+    <a href="https://huggingface.co/nicolasembleton/gliner2.5-multi-v1-onnx">multi</a>.
+    Nothing leaves the page except the Hugging Face download.
   </p>
+
+  <details class="block card" open>
+    <summary>GLiNER2 vs 2.5, and what this page can run</summary>
+    <div class="inner">
+      <p>GLiNER2 enumerates candidate spans up to a fixed width (about twelve words). Anything longer is invisible. GLiNER2.5 scores start and end boundaries instead, so a forty-word clause costs the same as a two-word name, and the public 4k-word window plus library chunking covers full documents.</p>
+      <p>Fastino's 2.5 blog also adds JointIE knowledge graphs, constrained classification, and span attributes. Those extra heads are in the Python library. This ONNX graph is the boundary entity path: <code>[E]</code> queries, pair reranker, char-offset spans. Structure fields work because they are the same <code>[E]</code> queries under a different parent name. Document classification (<code>[C]</code>) and typed relations (<code>[R]</code> / JointIE beam search) do not.</p>
+      <p>CrossNER is the one public NER number we can check. Fastino reports <b>macro F1</b> on 2.5-base <b>58.30</b> / 2.5-multi <b>54.85</b>. Our JS ONNX v2 domain-macro (same five test splits, threshold 0.5) is <b>55.8</b> / <b>52.2</b>. JS matches Python AutoExtractor on those splits; the remaining ~2.5 points is protocol (token-level vs char-span, not the export). Classification tables (XNLI +24.75, IMDB, …) cannot be reproduced from this graph.</p>
+      <table class="nums">
+        <thead><tr><th>CrossNER</th><th>blog 2.5 base</th><th>our JS base</th><th>blog 2.5 multi</th><th>our JS multi</th></tr></thead>
+        <tbody>
+          <tr><td>AI</td><td>50.69</td><td>48.6</td><td>45.60</td><td>43.2</td></tr>
+          <tr><td>Literature</td><td>54.56</td><td>53.1</td><td>51.52</td><td>50.3</td></tr>
+          <tr><td>Music</td><td>68.96</td><td>65.0</td><td>65.80</td><td>62.9</td></tr>
+          <tr><td>Politics</td><td>56.41</td><td>57.5</td><td>55.26</td><td>55.9</td></tr>
+          <tr><td>Science</td><td>60.85</td><td>54.7</td><td>56.08</td><td>48.7</td></tr>
+          <tr><td>domain-macro</td><td>58.30</td><td>55.8</td><td>54.85</td><td>52.2</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <div class="card">
+    <label>Examples from the Fastino README, tutorials, and 2.5 blog</label>
+    <div class="chips" id="chips"></div>
+    <p class="note" id="preset-note" hidden></p>
+  </div>
 
   <div class="card">
     <div class="row">
@@ -110,7 +175,7 @@
         <input type="text" id="threshold" value="0.5" inputmode="decimal" />
       </div>
       <div>
-        <label for="labels">Labels</label>
+        <label for="labels">Labels ([E] queries)</label>
         <input type="text" id="labels" value="person, organization, location, product" />
       </div>
     </div>
@@ -129,6 +194,7 @@
     <label>Result</label>
     <p id="output" style="margin: 0; font-size: 1.02rem;">Entities will appear here.</p>
     <div class="legend" id="legend"></div>
+    <div id="extra"></div>
     <div class="stats" id="stats"></div>
     <details>
       <summary>Raw entities (JSON)</summary>
@@ -138,15 +204,18 @@
 
   <footer>
     Protocol clean-room reimplemented from <a href="https://github.com/fastino-ai/GLiNER2">fastino-ai/GLiNER2</a> (Apache-2.0) ·
-    models Apache-2.0 · runs on <a href="https://onnxruntime.ai/docs/tutorials/web/">ONNX Runtime Web</a> ·
- code on <a href="https://github.com/Pastel-Org/gliner2.5-onnx-webgpu">GitHub</a>
+    models Apache-2.0 ·
+    <a href="https://fastino.ai/blog/gliner2-5-span-free-information-extraction">2.5 blog</a> ·
+    runs on <a href="https://onnxruntime.ai/docs/tutorials/web/">ONNX Runtime Web</a> ·
+    code on <a href="https://github.com/Pastel-Org/gliner2.5-onnx-webgpu">GitHub</a>
   </footer>
 </main>
 
 <script type="module">
   import {
-    GLINER_MODELS, hfFileUrl, GlinerBoundaryRuntime, downloadModel, decodeEntitiesV2,
+    GLINER_MODELS, hfFileUrl, GlinerBoundaryRuntime, downloadModel,
   } from "./src/gliner-boundary.mjs";
+  import { PRESETS } from "./src/demo-presets.mjs";
 
   const ort = await import("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.webgpu.bundle.min.mjs");
 
@@ -154,7 +223,8 @@
   const el = {
     model: $("model"), threshold: $("threshold"), labels: $("labels"),
     text: $("text"), run: $("run"), status: $("status"), output: $("output"),
-    legend: $("legend"), stats: $("stats"), raw: $("raw"),
+    legend: $("legend"), stats: $("stats"), raw: $("raw"), extra: $("extra"),
+    chips: $("chips"), note: $("preset-note"),
   };
 
   let session = null;
@@ -162,13 +232,53 @@
   let tokenizer = null;
   let tokenizerKey = null;
   const deviceLabel = { value: "?" };
+  let activePreset = PRESETS[0];
 
   function setStatus(msg, err = false) {
     el.status.textContent = msg;
     el.status.className = "status" + (err ? " err" : "");
   }
 
-  // WebGPU capability check
+  function parseLabels(s) {
+    return s.split(",").map((x) => x.trim()).filter(Boolean);
+  }
+
+  function applyPreset(p) {
+    activePreset = p;
+    el.text.value = p.text;
+    el.labels.value = p.labels;
+    if (p.suggestModel) el.model.value = p.suggestModel;
+    for (const b of el.chips.querySelectorAll(".chip")) {
+      b.classList.toggle("on", b.dataset.id === p.id);
+    }
+    if (p.note) {
+      el.note.hidden = false;
+      el.note.textContent = p.note;
+    } else {
+      el.note.hidden = true;
+    }
+  }
+
+  const groups = [];
+  for (const p of PRESETS) {
+    if (!groups.includes(p.group)) groups.push(p.group);
+  }
+  for (const g of groups) {
+    const tag = document.createElement("span");
+    tag.style.cssText = "font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:.2rem .2rem 0 0;";
+    tag.textContent = g;
+    el.chips.appendChild(tag);
+    for (const p of PRESETS.filter((x) => x.group === g)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip" + (p.id === activePreset.id ? " on" : "");
+      b.dataset.id = p.id;
+      b.textContent = p.title;
+      b.addEventListener("click", () => applyPreset(p));
+      el.chips.appendChild(b);
+    }
+  }
+
   if (navigator.gpu) {
     try {
       const adapter = await navigator.gpu.requestAdapter();
@@ -182,7 +292,6 @@
     if (session && sessionKey === modelKey) return;
     const meta = GLINER_MODELS[modelKey];
 
-    // Tokenizer (small download, via transformers.js)
     if (!tokenizer || tokenizerKey !== modelKey) {
       setStatus(`Loading tokenizer (${meta.repo})…`);
       const { AutoTokenizer, env } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0");
@@ -191,7 +300,6 @@
       tokenizerKey = modelKey;
     }
 
-    // ONNX session (large download, streamed with progress)
     if (session) { await session.release(); session = null; }
     const bytes = await downloadModel(hfFileUrl(meta.repo, "onnx/model.onnx"), {
       onProgress: (done, total) => {
@@ -202,8 +310,7 @@
       },
     });
     setStatus(`Creating session (${deviceLabel.value})…`);
-    const opts = { executionProviders: ["webgpu"] };
-    if (deviceLabel.value !== "WebGPU") opts.executionProviders = ["wasm"];
+    const opts = { executionProviders: deviceLabel.value === "WebGPU" ? ["webgpu"] : ["wasm"] };
     session = await ort.InferenceSession.create(bytes.buffer, opts);
     sessionKey = modelKey;
   }
@@ -215,30 +322,131 @@
     };
   }
 
-  function render(text, entities) {
-    // group overlapping spans for nested highlighting
-    const marks = entities
-      .slice()
-      .sort((a, b) => a.start - b.start || b.end - a.end);
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function passesValidator(text, spec) {
+    if (!spec) return true;
+    const flags = "i";
+    const re = spec.mode === "partial"
+      ? new RegExp(spec.pattern, flags)
+      : new RegExp(`^(?:${spec.pattern})$`, flags);
+    const ok = re.test(text);
+    return spec.exclude ? !ok : ok;
+  }
+
+  function applyFilters(entities, preset) {
+    let out = entities;
+    if (preset?.validators) {
+      out = out.filter((e) => {
+        const spec = preset.validators[e.label];
+        return spec ? passesValidator(e.text, spec) : true;
+      });
+    }
+    if (preset?.strFields?.length) {
+      const keep = new Set();
+      const by = {};
+      for (const e of out) (by[e.label] ??= []).push(e);
+      for (const [lab, list] of Object.entries(by)) {
+        list.sort((a, b) => b.score - a.score);
+        if (preset.strFields.includes(lab)) keep.add(list[0]);
+        else list.forEach((x) => keep.add(x));
+      }
+      out = out.filter((e) => !preset.strFields.includes(e.label) || keep.has(e));
+    }
+    return out;
+  }
+
+  function renderHighlight(text, entities) {
+    const marks = entities.slice().sort((a, b) => a.start - b.start || b.end - a.end);
     let html = "";
     let cursor = 0;
     let alt = 0;
-    const escape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     for (const e of marks) {
-      if (e.start < cursor) continue; // skip overlaps beyond first layer
-      html += escape(text.slice(cursor, e.start));
-      html += `<mark class="${alt % 4 === 1 ? "alt" : alt % 4 === 2 ? "alt2" : alt % 4 === 3 ? "alt3" : ""}">${escape(e.text)}</mark>`;
+      if (e.start < cursor) continue;
+      html += escapeHtml(text.slice(cursor, e.start));
+      const cls = alt % 4 === 1 ? "alt" : alt % 4 === 2 ? "alt2" : alt % 4 === 3 ? "alt3" : "";
+      html += `<mark class="${cls}">${escapeHtml(e.text)}</mark>`;
       cursor = e.end;
       alt++;
     }
-    html += escape(text.slice(cursor));
+    html += escapeHtml(text.slice(cursor));
     el.output.innerHTML = html;
-    el.raw.textContent = JSON.stringify(entities, null, 2);
-    const byLabel = {};
-    for (const e of entities) (byLabel[e.label] ??= []).push(e.text);
-    el.legend.innerHTML = Object.entries(byLabel)
-      .map(([l, xs]) => `<span><b>${l}</b> ${xs.length > 1 ? "×" + xs.length : ""}</span>`)
-      .join("");
+  }
+
+  function sentencesOf(text) {
+    const out = [];
+    const re = /[^.!?]+[.!?]+|[^.!?]+$/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      out.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+    }
+    return out;
+  }
+
+  function renderExtra(text, entities, preset) {
+    el.extra.innerHTML = "";
+    const view = preset?.view || "entities";
+    if (view === "json") {
+      const labels = parseLabels(preset.labels);
+      const rec = {};
+      for (const lab of labels) {
+        const hits = entities.filter((e) => e.label === lab).sort((a, b) => b.score - a.score);
+        rec[lab] = preset.strFields?.includes(lab)
+          ? (hits[0]?.text ?? null)
+          : hits.map((h) => h.text);
+      }
+      const wrap = {};
+      wrap[preset.parent || "record"] = [rec];
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(wrap, null, 2);
+      el.extra.appendChild(pre);
+    } else if (view === "graph") {
+      const by = {};
+      for (const e of entities) (by[e.label] ??= []).push(e);
+      const kg = document.createElement("div");
+      kg.className = "kg";
+      for (const [lab, list] of Object.entries(by)) {
+        const col = document.createElement("div");
+        col.className = "kg-col";
+        col.innerHTML = `<h3>${escapeHtml(lab)}</h3>` + list.map((e) => `<div class="node">${escapeHtml(e.text)}</div>`).join("");
+        kg.appendChild(col);
+      }
+      el.extra.appendChild(kg);
+      const sents = sentencesOf(text);
+      const edges = [];
+      for (const s of sents) {
+        const here = entities.filter((e) => e.start >= s.start && e.end <= s.end);
+        for (let i = 0; i < here.length; i++) {
+          for (let j = i + 1; j < here.length; j++) {
+            if (here[i].label === here[j].label) continue;
+            edges.push(`${here[i].text} (${here[i].label}) · ${here[j].text} (${here[j].label})`);
+          }
+        }
+      }
+      const ed = document.createElement("div");
+      ed.className = "edges";
+      ed.innerHTML = edges.length
+        ? `<b>Same-sentence co-mention</b> (host heuristic, not JointIE):<br>` + edges.map(escapeHtml).join("<br>")
+        : "No cross-type co-mentions in the same sentence.";
+      el.extra.appendChild(ed);
+    } else if (view === "redact") {
+      const marks = entities.slice().sort((a, b) => a.start - b.start || b.end - a.end);
+      let out = "";
+      let cursor = 0;
+      for (const e of marks) {
+        if (e.start < cursor) continue;
+        out += text.slice(cursor, e.start);
+        out += `[${e.label.toUpperCase()}]`;
+        cursor = e.end;
+      }
+      out += text.slice(cursor);
+      const pre = document.createElement("pre");
+      pre.className = "redact";
+      pre.textContent = out;
+      el.extra.appendChild(pre);
+    }
   }
 
   el.run.addEventListener("click", async () => {
@@ -246,21 +454,41 @@
     try {
       const modelKey = el.model.value;
       const threshold = Math.min(1, Math.max(0, parseFloat(el.threshold.value) || 0.5));
-      const labels = el.labels.value.split(",").map((s) => s.trim()).filter(Boolean);
+      const labels = parseLabels(el.labels.value);
       const text = el.text.value;
       if (!labels.length || !text.trim()) throw new Error("need text and at least one label");
+      const preset = activePreset;
 
       await ensureSession(modelKey);
       const rt = new GlinerBoundaryRuntime({ ort, session, tokenize: tokenizeWord(tokenizer) });
+      const opts = {
+        threshold,
+        parent: preset?.parent,
+        descriptions: preset?.descriptions,
+      };
 
       setStatus(`Running on ${deviceLabel.value}…`);
       const t0 = performance.now();
-      const entities = await rt.extractV2(text, labels, { threshold });
+      let entities;
+      if (preset?.chunkSize) {
+        entities = await rt.extractLong(text, labels, { ...opts, chunkSize: preset.chunkSize, chunkOverlap: preset.chunkOverlap || 16 });
+      } else {
+        entities = await rt.extractV2(text, labels, opts);
+      }
       const dt = performance.now() - t0;
+      entities = applyFilters(entities, preset);
 
-      render(text, entities);
-      el.stats.innerHTML = `${entities.length} entities · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b> · threshold: <b>${threshold}</b>`;
-      setStatus(`Done. ${deviceLabel.value === "WebGPU" ? "" : "(WASM fallback — no WebGPU adapter)"}`);
+      renderHighlight(text, entities);
+      renderExtra(text, entities, preset);
+      el.raw.textContent = JSON.stringify(entities, null, 2);
+      const byLabel = {};
+      for (const e of entities) (byLabel[e.label] ??= []).push(e.text);
+      el.legend.innerHTML = Object.entries(byLabel)
+        .map(([l, xs]) => `<span><b>${l}</b> ${xs.length > 1 ? "×" + xs.length : ""}</span>`)
+        .join("");
+      const extra = preset?.chunkSize ? ` · chunked ${preset.chunkSize}/${preset.chunkOverlap || 16}` : "";
+      el.stats.innerHTML = `${entities.length} entities · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b> · threshold: <b>${threshold}</b>${extra}`;
+      setStatus(deviceLabel.value === "WebGPU" ? "Done." : "Done. (WASM fallback — no WebGPU adapter)");
     } catch (err) {
       console.error(err);
       setStatus(String(err?.message ?? err), true);
@@ -269,11 +497,10 @@
     }
   });
 
-  // model switch resets session
   el.model.addEventListener("change", () => { session = null; sessionKey = null; });
 
   setStatus(deviceLabel.value === "WebGPU"
-    ? "WebGPU adapter available. Click extract."
+    ? "WebGPU adapter available. Pick an example or extract."
     : "No WebGPU adapter — will fall back to WASM (slower).");
 </script>
 </body>
