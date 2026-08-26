@@ -5,8 +5,9 @@
  * field-as-label JSON, and (later) classification / JointIE beam live here.
  */
 
-import { GlinerBoundaryRuntime, GLINER_MODELS, hfFileUrl, downloadModel } from "./gliner-boundary.mjs";
-import { proposeRelationPairs, beamSearchRelations, zipRecords } from "./joint-ie.mjs";
+import { GlinerBoundaryRuntime, GLINER_MODELS, hfFileUrl, downloadModel, decodeEntitiesV2, decodeEntities } from "./gliner-boundary.mjs";
+import { proposeRelationPairs, beamSearchRelations, zipRecords, collectLatticeMentions } from "./joint-ie.mjs";
+import { decodeConstrained } from "./classify-constraints.mjs";
 
 export { GLINER_MODELS, hfFileUrl, downloadModel };
 
@@ -52,10 +53,11 @@ export class Gliner25 {
   /**
    * @param {{ ort: any, session: any, tokenize: (t: string) => number[], pairTemperature?: number }} opts
    */
-  constructor({ ort, session, tokenize, pairTemperature = 1.0, graph = "v2", headsSession = null }) {
-    this.rt = new GlinerBoundaryRuntime({ ort, session, tokenize, pairTemperature, headsSession });
+  constructor({ ort, session, tokenize, pairTemperature = 1.0, graph = "v2", headsSession = null, attrsSession = null }) {
+    this.rt = new GlinerBoundaryRuntime({ ort, session, tokenize, pairTemperature, headsSession, attrsSession });
     this.session = session;
     this.headsSession = headsSession;
+    this.attrsSession = attrsSession;
     this.graph = graph;
     this.outputs = new Set((session.outputNames || []).map(String));
   }
@@ -187,17 +189,59 @@ export class Gliner25 {
       }
     }
     const out = {};
+    const raw = {};
+    let anyConstraint = Boolean(opts.implies || opts.excludes);
     for (const [name, spec] of Object.entries(tasks)) {
       const labels = spec.labels || spec;
       const multi = Boolean(spec.multi_label ?? spec.multiLabel);
       const threshold = spec.threshold ?? opts.threshold ?? 0.5;
-      out[name] = await this.rt.classify(text, name, labels, {
+      if (spec.implies || spec.excludes) anyConstraint = true;
+      const classified = await this.rt.classify(text, name, labels, {
         threshold,
-        multiLabel: multi,
+        multiLabel: false,
         descriptions: spec.descriptions,
       });
+      const scores = classified.scores || Object.fromEntries(labels.map((l) => [l, 0]));
+      raw[name] = { labels, scores, multi_label: multi, threshold };
+      if (!anyConstraint) {
+        out[name] = multi
+          ? labels.filter((l) => (scores[l] ?? 0) >= threshold).map((label) => ({ label, score: scores[label] }))
+          : classified;
+      }
+    }
+    if (anyConstraint) {
+      const implies = { ...opts.implies };
+      const excludes = { ...opts.excludes };
+      for (const [name, spec] of Object.entries(tasks)) {
+        for (const [src, dsts] of Object.entries(spec.implies || {})) {
+          implies[src.includes(":") ? src : `${name}:${src}`] = dsts.map((d) => d.includes(":") ? d : `${name}:${d}`);
+        }
+        for (const [src, dsts] of Object.entries(spec.excludes || {})) {
+          excludes[src.includes(":") ? src : `${name}:${src}`] = dsts.map((d) => d.includes(":") ? d : `${name}:${d}`);
+        }
+      }
+      return decodeConstrained(raw, { implies, excludes });
     }
     return out;
+  }
+
+  async extract_with_attributes(text, entityLabels, attrLabels, { threshold = 0.5, parent = "entities" } = {}) {
+    const entities = await this.rt.extract(text, entityLabels, { threshold, parent });
+    if (this.rt.attrsSession && entities.length) {
+      const scored = await this.rt.scoreExplicitAttributes(text, entities, attrLabels);
+      return scored;
+    }
+    const attrs = await this.rt.extract(text, attrLabels, {
+      threshold: Math.min(0.3, threshold),
+      parent: "attributes",
+    });
+    for (const e of entities) {
+      const hit = attrs
+        .filter((a) => a.start < e.end && e.start < a.end)
+        .sort((a, b) => b.score - a.score)[0];
+      if (hit) e.attribute = hit.label;
+    }
+    return entities;
   }
 
   async extract_relations(text, types, {
@@ -214,11 +258,39 @@ export class Gliner25 {
     const entityLabels = labels || [...new Set(
       Object.values(types).flatMap((s) => [...(s.head || s.heads || []), ...(s.tail || s.tails || [])]),
     )];
-    const entities = await this.rt.extract(text, entityLabels, { threshold });
-    const marg = await this.rt.computeMarginals(text, entityLabels, { relations: types });
-    const pairs = proposeRelationPairs(entities, types);
-    const scored = await this.rt.scoreRelations(marg, pairs);
-    const joint = beamSearchRelations(entities, scored, { threshold });
+    const margEnt = await this.rt.computeMarginals(text, entityLabels);
+    let entities;
+    if (margEnt.pairLogits) {
+      entities = decodeEntitiesV2({
+        pairIndices: margEnt.pairIndices,
+        pairLogits: margEnt.pairLogits,
+        pairValid: margEnt.pairValid,
+        candidateCount: margEnt.candidateCount,
+        labels: margEnt.labels,
+        wordOffsets: margEnt.words,
+        text: margEnt.normalized,
+        threshold,
+        pairTemperature: margEnt.pairTemperature,
+      });
+    } else {
+      entities = decodeEntities({
+        startLogits: margEnt.startLogits,
+        endLogits: margEnt.endLogits,
+        wordCount: margEnt.words.length,
+        labels: margEnt.labels,
+        wordOffsets: margEnt.words,
+        text: margEnt.normalized,
+        threshold,
+      });
+    }
+    const mentions = collectLatticeMentions(margEnt, {
+      argumentThreshold: 0.2,
+      pairTemperature: margEnt.pairTemperature ?? 1,
+    });
+    const margRel = await this.rt.computeMarginals(text, entityLabels, { relations: types });
+    const pairs = proposeRelationPairs(mentions, types);
+    const scored = await this.rt.scoreRelations(margRel, pairs);
+    const joint = beamSearchRelations(scored, { threshold });
     return {
       entities: toEntityMap(entities, { includeConfidence: include_confidence, includeSpans: true }),
       relations: joint.relations,

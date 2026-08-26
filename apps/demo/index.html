@@ -611,10 +611,24 @@
       setStatus(`Running on ${deviceLabel.value}…`);
       const t0 = performance.now();
       if (preset?.view === "classify") {
-        const task = preset.task || "label";
-        const result = await gliner.classify_text(text, task, labels, { threshold });
+        let result;
+        if (preset.tasks) {
+          result = await gliner.classify_text(text, preset.tasks, null, {
+            threshold, implies: preset.implies, excludes: preset.excludes,
+          });
+        } else {
+          const task = preset.task || "label";
+          result = await gliner.classify_text(text, task, labels, { threshold });
+        }
         const dt = performance.now() - t0;
-        el.output.textContent = `${task}: ${result[task].label} (${result[task].score.toFixed(3)})`;
+        const bits = Object.entries(result)
+          .filter(([k]) => !k.startsWith("_"))
+          .map(([k, v]) => {
+            if (v && v.label) return `${k}: ${v.label} (${Number(v.score || 0).toFixed(3)})`;
+            if (Array.isArray(v)) return `${k}: ${v.map((x) => x.label).join(", ")}`;
+            return `${k}: ${JSON.stringify(v)}`;
+          });
+        el.output.textContent = bits.join(" · ");
         el.extra.innerHTML = "";
         const pre = document.createElement("pre");
         pre.textContent = JSON.stringify(result, null, 2);
@@ -622,6 +636,20 @@
         el.raw.textContent = JSON.stringify(result, null, 2);
         el.legend.innerHTML = "";
         el.stats.innerHTML = `classify · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b>`;
+        setStatus("Done.");
+        return;
+      }
+      if (preset?.view === "attributes") {
+        const attrLabels = parseLabels(preset.attributeLabels || "positive, negative, neutral");
+        const ents = await gliner.extract_with_attributes(text, labels, attrLabels, { threshold });
+        const dt = performance.now() - t0;
+        renderHighlight(text, ents);
+        el.extra.innerHTML = ents.map((e) =>
+          `<div class="node">${escapeHtml(e.text)} <b>${escapeHtml(e.attribute || "—")}</b>${e.attributeScore != null ? " " + e.attributeScore.toFixed(3) : ""}</div>`
+        ).join("");
+        el.raw.textContent = JSON.stringify(ents, null, 2);
+        el.legend.innerHTML = "";
+        el.stats.innerHTML = `${ents.length} spans · attributes · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b>`;
         setStatus("Done.");
         return;
       }

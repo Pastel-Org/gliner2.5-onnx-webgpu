@@ -319,13 +319,14 @@ export function decodeEntitiesV2({
  * @param {number} [opts.pairTemperature] v2 graphs: pair logit temperature (1.0 in current exports)
  */
 export class GlinerBoundaryRuntime {
-  constructor({ ort, session, tokenize, pairTemperature = 1.0, headsSession = null }) {
+  constructor({ ort, session, tokenize, pairTemperature = 1.0, headsSession = null, attrsSession = null }) {
     if (!ort || !session || !tokenize) throw new Error("ort, session and tokenize are required");
     this.ort = ort;
     this.session = session;
     this.tokenize = tokenize;
     this.pairTemperature = pairTemperature;
     this.headsSession = headsSession;
+    this.attrsSession = attrsSession;
     this._cache = new Map();
     this.inputNames = new Set((session.inputNames || []).map(String));
     this.outputNames = new Set((session.outputNames || []).map(String));
@@ -427,7 +428,7 @@ export class GlinerBoundaryRuntime {
       : null;
     const textStates = results.text_states ?? null;
     const relRoleStates = results.rel_role_states ?? null;
-    const extra = { clsLogits, textStates, relRoleStates, relRoleCount: relMarkerPositions.length };
+    const extra = { clsLogits, textStates, relRoleStates, relRoleCount: relMarkerPositions.length, queryStates: results.query_states ?? null };
     if (results.pair_logits) {
       return {
         normalized,
@@ -536,6 +537,49 @@ export class GlinerBoundaryRuntime {
     const out = await this.headsSession.run(feeds);
     const logits = out.rel_logits.data;
     return pairs.map((p, i) => ({ ...p, logit: logits[i], score: sigmoid(logits[i]) }));
+  }
+
+  async scoreExplicitAttributes(text, entities, attrLabels) {
+    if (!this.attrsSession) return entities;
+    const marg = await this.computeMarginals(text, attrLabels, { parent: "attributes" });
+    const qstates = marg.queryStates || marg.textStates;
+    if (!qstates || !marg.textStates) return entities;
+    const L = marg.textStates.dims[1];
+    const H = marg.textStates.dims[2];
+    const Q = attrLabels.length;
+    const C = Math.max(entities.length, 1);
+    const indices = new BigInt64Array(Q * C * 2);
+    for (let q = 0; q < Q; q++) {
+      for (let c = 0; c < C; c++) {
+        const e = entities[c] || entities[0];
+        const off = (q * C + c) * 2;
+        indices[off] = BigInt(e.wordStart ?? 0);
+        indices[off + 1] = BigInt(e.wordEnd ?? 1);
+      }
+    }
+    const mask = new Float32Array(L).fill(1);
+    const qmask = new Float32Array(Q).fill(1);
+    const feeds = {
+      text_states: marg.textStates,
+      text_word_mask: new this.ort.Tensor("float32", mask, [1, L]),
+      query_states: marg.queryStates,
+      query_marker_mask: new this.ort.Tensor("float32", qmask, [1, Q]),
+      span_indices: new this.ort.Tensor("int64", indices, [1, Q, C, 2]),
+    };
+    if (!marg.queryStates) return entities;
+    const out = await this.attrsSession.run(feeds);
+    const logits = out.attr_logits.data;
+    for (let c = 0; c < entities.length; c++) {
+      let best = 0;
+      let bestV = -1e9;
+      for (let q = 0; q < Q; q++) {
+        const v = logits[q * C + c];
+        if (v > bestV) { bestV = v; best = q; }
+      }
+      entities[c].attribute = attrLabels[best];
+      entities[c].attributeScore = sigmoid(bestV);
+    }
+    return entities;
   }
 
   /**

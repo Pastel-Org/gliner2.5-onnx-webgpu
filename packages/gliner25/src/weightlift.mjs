@@ -107,12 +107,26 @@ export function glinerModel({
           headsSession = null;
         }
 
+        let attrsSession = null;
+        try {
+          const attrsUrl = hfFileUrl(meta.repo, "onnx/attrs.onnx") + "?v=5";
+          progress.dispatch({ type: "initiate", file: "onnx/attrs.onnx" });
+          const attrsBytes = await downloadModel(attrsUrl);
+          progress.dispatch({ type: "done", file: "onnx/attrs.onnx" });
+          attrsSession = await ort.InferenceSession.create(attrsBytes.buffer, {
+            executionProviders: providers,
+          });
+        } catch {
+          attrsSession = null;
+        }
+
         progress.dispatch({ type: "ready" });
         return new Gliner25({
           ort,
           session,
           tokenize: tokenizeWord(tokenizer),
           headsSession,
+          attrsSession,
         });
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
