@@ -44,7 +44,7 @@ export function proposeRelationPairs(entities, relationTypes, {
   return pairs;
 }
 
-export function beamSearchRelations(entities, scoredPairs, { beamWidth = 16, threshold = 0.2 } = {}) {
+export function beamSearchRelations(entities, scoredPairs, { beamWidth = 16, threshold = 0.5 } = {}) {
   const edges = scoredPairs
     .filter((p) => p.score >= threshold)
     .sort((a, b) => b.score + b.head.score + b.tail.score - (a.score + a.head.score + a.tail.score));

@@ -218,7 +218,7 @@ export class Gliner25 {
     const marg = await this.rt.computeMarginals(text, entityLabels, { relations: types });
     const pairs = proposeRelationPairs(entities, types);
     const scored = await this.rt.scoreRelations(marg, pairs);
-    const joint = beamSearchRelations(entities, scored, { threshold: Math.min(0.25, threshold) });
+    const joint = beamSearchRelations(entities, scored, { threshold });
     return {
       entities: toEntityMap(entities, { includeConfidence: include_confidence, includeSpans: true }),
       relations: joint.relations,
