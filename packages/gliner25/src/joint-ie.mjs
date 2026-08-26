@@ -183,3 +183,76 @@ export function zipRecords(fieldHits, { strFields = [], parent = "record" } = {}
   }
   return { [parent]: recs };
 }
+
+export function attachAttributesFromLattice(entities, attrMarg, attrLabels) {
+  const C = attrMarg.candidateCount;
+  if (!C || !attrMarg.pairLogits) return entities;
+  const temp = attrMarg.pairTemperature || 1;
+  for (const e of entities) {
+    let hit = null;
+    for (let q = 0; q < attrLabels.length; q++) {
+      for (let c = 0; c < C; c++) {
+        if (!attrMarg.pairValid[q * C + c]) continue;
+        const s = Number(attrMarg.pairIndices[q * C * 2 + c * 2]);
+        const en = Number(attrMarg.pairIndices[q * C * 2 + c * 2 + 1]);
+        if (s !== e.wordStart || en !== e.wordEnd) continue;
+        const p = sigmoid(attrMarg.pairLogits[q * C + c] / temp);
+        if (!hit || p > hit.score) hit = { label: attrLabels[q], score: p };
+      }
+    }
+    if (hit) {
+      e.attribute = hit.label;
+      e.attributeScore = hit.score;
+    }
+  }
+  return entities;
+}
+
+export function decodeAssignedRecords({
+  parent, parsed, instSlots, assign, marg, toItem,
+}) {
+  const C = marg.candidateCount;
+  const F = parsed.length;
+  const recs = [];
+  const temp = marg.pairTemperature || 1;
+  for (let i = 0; i < instSlots.length; i++) {
+    const rec = {};
+    for (let f = 0; f < F; f++) {
+      const width = C + 1;
+      const base = i * F * width + f * width;
+      const nullLogit = assign[base];
+      if (parsed[f].dtype === "list") {
+        const hits = [];
+        for (let c = 0; c < C; c++) {
+          if (!marg.pairValid[f * C + c]) continue;
+          if (assign[base + 1 + c] <= nullLogit) continue;
+          const s = Number(marg.pairIndices[f * C * 2 + c * 2]);
+          const e = Number(marg.pairIndices[f * C * 2 + c * 2 + 1]);
+          const p = sigmoid(marg.pairLogits[f * C + c] / temp);
+          const m = mentionFromSpan(parsed[f].name, s, e, p, marg.words, marg.normalized);
+          if (m) hits.push(toItem(m));
+        }
+        rec[parsed[f].name] = hits;
+      } else {
+        let best = 0;
+        let bestV = nullLogit;
+        for (let c = 0; c < C; c++) {
+          const v = assign[base + 1 + c];
+          if (v > bestV) { bestV = v; best = c + 1; }
+        }
+        if (best === 0) {
+          rec[parsed[f].name] = null;
+          continue;
+        }
+        const c = best - 1;
+        const s = Number(marg.pairIndices[f * C * 2 + c * 2]);
+        const e = Number(marg.pairIndices[f * C * 2 + c * 2 + 1]);
+        const p = sigmoid(marg.pairLogits[f * C + c] / temp);
+        const m = mentionFromSpan(parsed[f].name, s, e, p, marg.words, marg.normalized);
+        rec[parsed[f].name] = m ? toItem(m) : null;
+      }
+    }
+    recs.push(rec);
+  }
+  return { [parent]: recs };
+}

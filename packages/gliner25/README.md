@@ -7,7 +7,7 @@ dependencies — you pass `onnxruntime-web` and a tokenizer loader yourself.
 Models: [small](https://huggingface.co/nicolasembleton/gliner2.5-small-v1-onnx) ·
 [base](https://huggingface.co/nicolasembleton/gliner2.5-base-v1-onnx) ·
 [multi](https://huggingface.co/nicolasembleton/gliner2.5-multi-v1-onnx)
-(revision 4 graphs: entity path + classifier + cached states + `heads.onnx` relation scorer).
+(revision 5 graphs: entity path + classifier + cached states + `candidate_states` + `heads.onnx` + `records.onnx`).
 
 ## Install
 
@@ -47,7 +47,9 @@ await gliner.extract_relations(text, { works_for: { head: ["person"], tail: ["or
 | `extract_json` (field-as-label) | v2+ |
 | `classify_text` | v3 |
 | `extract_relations` (JointIE beam in JS) | v4 `heads.onnx` |
-| `extract_json(..., { records: true })` | host zip of list fields, not RecordHead |
+| `extract_json(..., { records: true })` | v5 `candidate_states` + `records.onnx` |
+| `classify_text(..., { implies, excludes })` | v3 logits + JS beam |
+| `extract_with_attributes` | lattice lookup on attribute `[E]` queries; `score_explicit_spans` graph did not export cleanly |
 
 Host-side decode, overlap resolution, long-document chunking, and JSON
 field typing are JavaScript here; the ONNX graph does neural scoring only.

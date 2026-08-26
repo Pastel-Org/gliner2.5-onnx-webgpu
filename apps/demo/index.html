@@ -695,6 +695,25 @@
         setStatus("Done.");
         return;
       }
+      if (preset?.records) {
+        const fields = parseLabels(preset.labels).map((name) =>
+          (preset.strFields || []).includes(name) ? `${name}::str` : name
+        );
+        const structures = { [preset.parent || "record"]: fields };
+        const result = await gliner.extract_json(text, structures, { threshold, records: true });
+        const dt = performance.now() - t0;
+        el.output.textContent = "";
+        el.extra.innerHTML = "";
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(result, null, 2);
+        el.extra.appendChild(pre);
+        el.raw.textContent = JSON.stringify(result, null, 2);
+        el.legend.innerHTML = "";
+        const n = (result[preset.parent || "record"] || []).length;
+        el.stats.innerHTML = `${n} records · RecordHead · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b>`;
+        setStatus("Done.");
+        return;
+      }
       let entities;
       if (preset?.chunkSize) {
         entities = await gliner.extractLong(text, labels, { ...opts, chunkSize: preset.chunkSize, chunkOverlap: preset.chunkOverlap || 16 });

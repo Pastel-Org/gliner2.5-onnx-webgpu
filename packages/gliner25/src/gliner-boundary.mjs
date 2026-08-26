@@ -319,7 +319,7 @@ export function decodeEntitiesV2({
  * @param {number} [opts.pairTemperature] v2 graphs: pair logit temperature (1.0 in current exports)
  */
 export class GlinerBoundaryRuntime {
-  constructor({ ort, session, tokenize, pairTemperature = 1.0, headsSession = null, attrsSession = null }) {
+  constructor({ ort, session, tokenize, pairTemperature = 1.0, headsSession = null, attrsSession = null, recordsSession = null }) {
     if (!ort || !session || !tokenize) throw new Error("ort, session and tokenize are required");
     this.ort = ort;
     this.session = session;
@@ -327,6 +327,7 @@ export class GlinerBoundaryRuntime {
     this.pairTemperature = pairTemperature;
     this.headsSession = headsSession;
     this.attrsSession = attrsSession;
+    this.recordsSession = recordsSession;
     this._cache = new Map();
     this.inputNames = new Set((session.inputNames || []).map(String));
     this.outputNames = new Set((session.outputNames || []).map(String));
@@ -428,7 +429,12 @@ export class GlinerBoundaryRuntime {
       : null;
     const textStates = results.text_states ?? null;
     const relRoleStates = results.rel_role_states ?? null;
-    const extra = { clsLogits, textStates, relRoleStates, relRoleCount: relMarkerPositions.length, queryStates: results.query_states ?? null };
+    const extra = {
+      clsLogits, textStates, relRoleStates,
+      relRoleCount: relMarkerPositions.length,
+      queryStates: results.query_states ?? null,
+      candidateStates: results.candidate_states ?? null,
+    };
     if (results.pair_logits) {
       return {
         normalized,
@@ -580,6 +586,48 @@ export class GlinerBoundaryRuntime {
       entities[c].attributeScore = sigmoid(bestV);
     }
     return entities;
+  }
+
+  async scoreRecords(marg, parsed, { threshold = 0.5 } = {}) {
+    if (!this.recordsSession || !marg.candidateStates || !marg.queryStates) return null;
+    const Q = parsed.length;
+    const C = marg.candidateCount;
+    const H = marg.candidateStates.dims[3];
+    const cs = marg.candidateStates.data;
+    const qs = marg.queryStates.data;
+    const temp = marg.pairTemperature || 1;
+    const anchor = Math.max(0, parsed.findIndex((p) => p.dtype === "str"));
+    const instSlots = [];
+    for (let c = 0; c < C; c++) {
+      if (!marg.pairValid[anchor * C + c]) continue;
+      const p = sigmoid(marg.pairLogits[anchor * C + c] / temp);
+      if (p >= threshold) instSlots.push(c);
+    }
+    if (!instSlots.length) return null;
+    const N = instSlots.length;
+    const inst = new Float32Array(N * H);
+    const instMask = new Float32Array(N).fill(1);
+    for (let i = 0; i < N; i++) {
+      const src = (anchor * C + instSlots[i]) * H;
+      inst.set(cs.subarray(src, src + H), i * H);
+    }
+    const fieldQ = new Float32Array(Q * H);
+    fieldQ.set(qs.subarray(0, Q * H));
+    const fieldC = new Float32Array(Q * C * H);
+    fieldC.set(cs.subarray(0, Q * C * H));
+    const fieldMask = new Float32Array(Q * C);
+    for (let q = 0; q < Q; q++) {
+      for (let c = 0; c < C; c++) fieldMask[q * C + c] = marg.pairValid[q * C + c] ? 1 : 0;
+    }
+    const feeds = {
+      inst_states: new this.ort.Tensor("float32", inst, [1, N, H]),
+      inst_mask: new this.ort.Tensor("float32", instMask, [1, N]),
+      field_query_states: new this.ort.Tensor("float32", fieldQ, [1, Q, H]),
+      field_cand_states: new this.ort.Tensor("float32", fieldC, [1, Q, C, H]),
+      field_cand_mask: new this.ort.Tensor("float32", fieldMask, [1, Q, C]),
+    };
+    const out = await this.recordsSession.run(feeds);
+    return { instSlots, assign: out.assign_logits.data, objectLogits: out.object_logits.data };
   }
 
   /**

@@ -243,6 +243,7 @@ export const PRESETS = [
     title: "Two prescriptions",
     view: "json",
     records: true,
+    note: "Natural RecordHead: first str field seeds instances; records.onnx assigns the rest (null column).",
     parent: "prescription",
     labels: "medication, dosage, frequency, name, age",
     strFields: ["name", "age"],

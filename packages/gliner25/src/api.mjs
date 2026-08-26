@@ -6,7 +6,7 @@
  */
 
 import { GlinerBoundaryRuntime, GLINER_MODELS, hfFileUrl, downloadModel, decodeEntitiesV2, decodeEntities } from "./gliner-boundary.mjs";
-import { proposeRelationPairs, beamSearchRelations, zipRecords, collectLatticeMentions } from "./joint-ie.mjs";
+import { proposeRelationPairs, beamSearchRelations, zipRecords, collectLatticeMentions, attachAttributesFromLattice, decodeAssignedRecords } from "./joint-ie.mjs";
 import { decodeConstrained } from "./classify-constraints.mjs";
 
 export { GLINER_MODELS, hfFileUrl, downloadModel };
@@ -53,11 +53,12 @@ export class Gliner25 {
   /**
    * @param {{ ort: any, session: any, tokenize: (t: string) => number[], pairTemperature?: number }} opts
    */
-  constructor({ ort, session, tokenize, pairTemperature = 1.0, graph = "v2", headsSession = null, attrsSession = null }) {
-    this.rt = new GlinerBoundaryRuntime({ ort, session, tokenize, pairTemperature, headsSession, attrsSession });
+  constructor({ ort, session, tokenize, pairTemperature = 1.0, graph = "v2", headsSession = null, attrsSession = null, recordsSession = null }) {
+    this.rt = new GlinerBoundaryRuntime({ ort, session, tokenize, pairTemperature, headsSession, attrsSession, recordsSession });
     this.session = session;
     this.headsSession = headsSession;
     this.attrsSession = attrsSession;
+    this.recordsSession = recordsSession;
     this.graph = graph;
     this.outputs = new Set((session.outputNames || []).map(String));
   }
@@ -148,8 +149,17 @@ export class Gliner25 {
           : h.text
       );
       if (records) {
+        const marg = await this.rt.computeMarginals(text, labels, { parent, descriptions: desc });
+        const scored = await this.rt.scoreRecords(marg, parsed, { threshold });
+        if (scored) {
+          Object.assign(result, decodeAssignedRecords({
+            parent, parsed, instSlots: scored.instSlots, assign: scored.assign, marg, toItem,
+          }));
+          continue;
+        }
         const fieldHits = {};
         const strFields = [];
+        const entities = await this.rt.extract(text, labels, { threshold, parent, descriptions: desc });
         for (const p of parsed) {
           const hits = entities.filter((e) => e.label === p.name).sort((a, b) => a.start - b.start);
           fieldHits[p.name] = hits.map(toItem);
@@ -231,17 +241,8 @@ export class Gliner25 {
       const scored = await this.rt.scoreExplicitAttributes(text, entities, attrLabels);
       return scored;
     }
-    const attrs = await this.rt.extract(text, attrLabels, {
-      threshold: Math.min(0.3, threshold),
-      parent: "attributes",
-    });
-    for (const e of entities) {
-      const hit = attrs
-        .filter((a) => a.start < e.end && e.start < a.end)
-        .sort((a, b) => b.score - a.score)[0];
-      if (hit) e.attribute = hit.label;
-    }
-    return entities;
+    const attrMarg = await this.rt.computeMarginals(text, attrLabels, { parent: "attributes" });
+    return attachAttributesFromLattice(entities, attrMarg, attrLabels);
   }
 
   async extract_relations(text, types, {

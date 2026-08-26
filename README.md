@@ -16,9 +16,10 @@ Requires a browser with `navigator.gpu` (Chrome/Edge 113+, Safari 26+ tech previ
 
 ## What this is
 
-The `gliner2.5-{small,base,multi}-v1-onnx` exports are **revision 3** boundary
-graphs: DeBERTa encoder, sparse proposer, pair reranker, **classification MLP**,
-and cached `text_states`. One encoder pass. Host packing and decode live here
+The `gliner2.5-{small,base,multi}-v1-onnx` exports are **revision 5** boundary
+graphs: DeBERTa encoder, sparse proposer, pair reranker, classification MLP,
+cached `text_states`, `candidate_states`, plus tiny `heads.onnx` / `records.onnx`.
+One encoder pass. Host packing and decode live here
 (clean-room from [fastino-ai/GLiNER2](https://github.com/fastino-ai/GLiNER2), Apache-2.0).
 
 ```text
