@@ -239,7 +239,8 @@ export class Gliner25 {
   async extract_with_attributes(text, entityLabels, attrLabels, { threshold = 0.5, parent = "entities", multiLabel = false } = {}) {
     // Python packs entity labels and attribute labels as one [E] block.
     // A product-only pass keeps "iPhone"; the joint pack keeps "iPhone camera".
-    const packed = [...entityLabels, ...attrLabels];
+    const attrPacked = [...attrLabels].sort();
+    const packed = [...entityLabels, ...attrPacked];
     const marg = await this.rt.computeMarginals(text, packed, { parent });
     let entities = [];
     if (marg.pairLogits) {
@@ -267,7 +268,7 @@ export class Gliner25 {
     }
     if (this.rt.attrsSession && entities.length) {
       try {
-        return await this.rt.scoreExplicitAttributes(text, entities, attrLabels, {
+        return await this.rt.scoreExplicitAttributes(text, entities, attrPacked, {
           marg, queryOffset: entityLabels.length, multiLabel,
         });
       } catch (err) {
