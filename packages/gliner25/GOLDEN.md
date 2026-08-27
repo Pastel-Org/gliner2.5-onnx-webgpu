@@ -29,5 +29,6 @@ Three instances. Dosage and frequency empty on all. Names are long/low-score exc
 
 One product: “iPhone camera” 0.903 with sentiment **negative 0.592** (softmax).
 NER-only on the same text keeps “iPhone” 0.933. The joint `[E]` pack
-(product + positive/negative/neutral) is what changes the span.
-JS now packs the same way and scores with `attrs.onnx`.
+(product + negative/neutral/positive, sorted) is what changes the span.
+ONNX `pair_valid` is all-true; decode drops `start >= end` slots before overlap
+or they steal the longer mention.
