@@ -98,6 +98,10 @@ export class Gliner25 {
     };
   }
 
+  /**
+   * Long-document NER. 384-word windows, overlap 64, remap to document
+   * offsets. Each GPU run sees at most chunk_size words.
+   */
   async extract_entities_long(text, labels, {
     threshold = 0.5,
     chunk_size = 384,
@@ -183,6 +187,11 @@ export class Gliner25 {
     return result;
   }
 
+  /**
+   * One forward pass. Cap NATIVE_MAX_WORDS (4096).
+   * WebGPU: small handled 4096 words; base/multi died ~3500–3600.
+   * Long documents on WebGPU: classify_text_long (384/64), not this method.
+   */
   async classify_text(text, taskOrMap, labelsMaybe, opts = {}) {
     if (!this.hasClassifier) {
       const err = new Error("classify_text needs a v3 graph (cls_logits). This session is entity-only.");
@@ -237,9 +246,10 @@ export class Gliner25 {
   }
 
   /**
-   * Python classify_text_long: 384/64 word windows, keep the highest-confidence
-   * chunk per task. Constrained classify stays one-shot (constraints need the
-   * full label set in one beam).
+   * Long-document classify. Same as Python classify_text_long:
+   * 384-word windows, overlap 64, keep the highest-confidence chunk.
+   * A 4096-word string is 13 GPU runs of 384 words, not one 4096-word encode.
+   * Constrained classify stays one-shot (beam needs the full label set).
    */
   async classify_text_long(text, taskOrMap, labelsMaybe, opts = {}) {
     if (!this.hasClassifier) {

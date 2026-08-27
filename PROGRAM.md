@@ -21,9 +21,9 @@ builds these). Dummy K=1 masked when unused. Do not ship a second encoder.
 ## 2. JS library (`src/api.mjs`)
 
 Python `AutoExtractor` shape: `extract_entities`, `extract_json`,
-`classify_text`, `extract_relations`, `extract_*_long`. Same packing as
-`processor.py` (`[E]` / `[C]` / `[R]`, descriptions in the parent token).
-Beam, constraints, overlap policy stay here.
+`classify_text`, `classify_text_long`, `extract_relations`, `extract_*_long`.
+`classify_text` is one shot (WebGPU base/multi die ~3500 words).
+`classify_text_long` is 384/64, same as Python.
 
 ## 3. Weightlift adapter (`src/weightlift.mjs`)
 

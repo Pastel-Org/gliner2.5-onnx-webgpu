@@ -244,7 +244,8 @@
   <details class="block card" open>
     <summary>GLiNER2 vs 2.5, and what this page can run</summary>
     <div class="inner">
-      <p>GLiNER2 enumerates candidate spans up to a fixed width (about twelve words). Anything longer is invisible. GLiNER2.5 scores start and end boundaries instead, so a forty-word clause costs the same as a two-word name, and the public 4k-word window plus library chunking covers full documents.</p>
+      <p>GLiNER2 enumerates candidate spans up to a fixed width (about twelve words). Anything longer is invisible. GLiNER2.5 scores start and end boundaries instead, so a forty-word clause costs the same as a two-word name.</p>
+      <p>Python <code>classify_text</code> is one forward pass (trained <code>max_len</code> 4096 words). That is Fastino’s long-context classification on CUDA/CPU. This page is WebGPU. One-shot <code>classify_text</code> on <b>small</b> finished 4096 words here. <b>base</b> and <b>multi</b> died between 3500 and 3600 words (12-head attention vs Chrome’s ~1&nbsp;GiB buffer). The <b>Long contract</b> chip calls <code>classify_text_long</code>: 384-word windows, overlap 64. A 4096-word file is 13 GPU runs of 384 words, not one 4096-word encode. Same split as Python <code>classify_text_long</code>.</p>
       <p>Fastino's 2.5 blog also adds JointIE knowledge graphs, constrained classification, and span attributes. This page runs the boundary entity path, the v3 classifier, and (when <code>heads.onnx</code> is loaded) typed JointIE edges. Record-mode JSON is host assignment of repeated fields, not the neural RecordHead.</p>
       <p>CrossNER is the one public NER number we can check. Fastino reports <b>macro F1</b> on 2.5-base <b>58.30</b> / 2.5-multi <b>54.85</b>. Our JS ONNX domain-macro (same five test splits, threshold 0.5) is <b>55.8</b> / <b>52.2</b>. JS matches Python AutoExtractor on those splits; the remaining ~2.5 points is protocol (token-level vs char-span, not the export).</p>
       <table class="nums">
@@ -620,6 +621,9 @@
           chunk_size: preset.chunkSize,
           chunk_overlap: preset.chunkOverlap,
         };
+        // classify_text = one OrtRun over the whole string (cap 4096).
+        // classify_text_long = 384/64 windows. Use that for long docs on
+        // WebGPU base/multi (one-shot dies ~3500 words).
         const runClassify = preset?.long
           ? (t, tasks, labels) => gliner.classify_text_long(t, tasks, labels, classifyOpts)
           : (t, tasks, labels) => gliner.classify_text(t, tasks, labels, classifyOpts);
@@ -644,7 +648,10 @@
         el.extra.appendChild(pre);
         el.raw.textContent = JSON.stringify(result, null, 2);
         el.legend.innerHTML = "";
-        const chunkBit = result._chunks > 1 ? ` · ${result._chunks} chunks · ${result._words} words` : "";
+        const nWords = el.text.value.trim().split(/\s+/).filter(Boolean).length;
+        const chunkBit = result._chunks > 1
+          ? ` · long 384/64 · ${result._chunks} windows · ${result._words} words`
+          : ` · one-shot · ${nWords} words`;
         el.stats.innerHTML = `classify${chunkBit} · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b>`;
         setStatus("Done.");
         return;

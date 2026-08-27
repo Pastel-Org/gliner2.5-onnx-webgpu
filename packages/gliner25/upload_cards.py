@@ -61,10 +61,19 @@ Attribute labels are packed with entity labels in one `[E]` block (sorted).
 Single-label attributes use softmax. ONNX `pair_valid` is all-true; the host
 drops `start >= end` slots before overlap.
 
-Python `max_len` is 4096 words. On WebGPU, one-shot classify/NER on **small**
-handled 4096 words; **base** and **multi** died between 3500 and 3600 words
-(`createCommandEncoder` / `std::bad_alloc`). Use `classify_text_long` /
-`extract_entities_long` (384/64) past that.
+Python `max_len` is 4096 words: `classify_text` / `extract` is **one
+forward pass** over the whole document. That is what Fastino means by
+long-context classification on CUDA/CPU.
+
+This WebGPU export is not that:
+
+| Call | Words in one GPU run | Measured here (M2 Max, onnxruntime-web) |
+|------|----------------------|------------------------------------------|
+| `classify_text` / `extract` | the whole string (cap 4096) | **small** finished 4096 words. **base** and **multi** died between 3500 and 3600 (`createCommandEncoder` / `std::bad_alloc`). |
+| `classify_text_long` / `extract_entities_long` | **384**, overlap **64** | 4096-word docs: 13 windows. base 2.75 s, multi 4.3 s. Merge is max-confidence (classify) or span overlap (NER). |
+
+A 4096-word `classify_text_long` never builds a 4096-word attention matrix.
+Use the `*_long` APIs for contracts on base/multi in the browser.
 
 ## Still not in ONNX
 

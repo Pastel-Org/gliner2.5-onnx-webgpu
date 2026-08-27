@@ -85,7 +85,13 @@ const entities = await rt.extract(
 - **Decode path**: revision 2 of the exports contains the pair reranker, so span scores are the same reranked logits the Python `AutoExtractor` pipeline produces (4-decimal parity verified). The first revision exposed boundary marginals only and required a `min(sigmoid(start), sigmoid(end))` proxy; that cost precision at low thresholds. With v2, the threshold curve is flat: 0.3–0.7 all within ~0.02 F1 of peak.
 - **Eval numbers** (synthetic 26-sample suite, 8 labels, EN/FR/DE, 103 gold spans, CPU): peak partial span-F1 0.86 (small), 0.92 (base), 0.91 (multi). Base is the strongest overall: 0.92 F1 at recall 0.97. Precision at threshold 0.3 improved from 0.45 to 0.77 (small) going from the marginal proxy to the reranker.
 - **Candidate pool recall trade-off**: spans must survive a fixed 192-candidate pool before reranking, instead of exhaustive marginal enumeration. Recall at aggressive thresholds dips 3–6 points vs the v1 exhaustive decode; peak-F1 recall is unchanged.
-- **WebGPU caveat**: int64 input tensors are required by the graph. Some browsers lack int64 support in WebGPU kernels; the demo falls back to WASM when no WebGPU adapter is present.
+- **WebGPU length**: Python `classify_text` is one pass (max_len 4096 words).
+  On this host, one-shot **small** finished 4096 words; **base** and **multi**
+  died between 3500 and 3600 words. Long docs: `classify_text_long` /
+  `extract_entities_long` (384/64 windows). A 4096-word file is 13 runs of
+  384 words, not one 4096-word encode.
+- **WebGPU int64**: some browsers lack int64 in WebGPU kernels; the demo
+  falls back to WASM when no adapter is present.
 - Tokenizer files come from the model repos via transformers.js 4.2.0 (pinned), ONNX Runtime Web 1.26.0 (pinned).
 
 ## Credits & license

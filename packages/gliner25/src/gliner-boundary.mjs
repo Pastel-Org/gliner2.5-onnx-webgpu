@@ -39,8 +39,8 @@ export const GLINER_MODELS = {
   },
 };
 
-export const NATIVE_MAX_WORDS = 4096;
-export const LONG_CHUNK_SIZE = 384;
+export const NATIVE_MAX_WORDS = 4096; // Python max_len; one-shot cap. WebGPU base/multi die ~3500.
+export const LONG_CHUNK_SIZE = 384;   // Python classify_text_long / extract_*_long
 export const LONG_CHUNK_OVERLAP = 64;
 
 /** HF resolve URL for a repo file (LFS-aware, CORS-enabled). */
@@ -814,6 +814,7 @@ export class GlinerBoundaryRuntime {
    * Host-side long-document scan: overlapping word chunks, remap to the
    * original (normalized) string, merge duplicate spans per label.
    * Mirrors extract_entities_long in the Python library.
+   * Each OrtRun sees at most chunkSize words (default 384), never the full doc.
    */
   async extractLong(text, labels, {
     threshold = 0.5,
@@ -848,6 +849,7 @@ export class GlinerBoundaryRuntime {
   /**
    * classify_text_long: overlapping word chunks, keep the highest-confidence
    * chunk result (Python merge of classification dicts).
+   * Each OrtRun sees at most chunkSize words (default 384), never maxWords.
    */
   async classifyLong(text, task, labels, {
     threshold = 0.5,
