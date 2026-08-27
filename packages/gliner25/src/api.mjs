@@ -5,11 +5,11 @@
  * field-as-label JSON, and (later) classification / JointIE beam live here.
  */
 
-import { GlinerBoundaryRuntime, GLINER_MODELS, hfFileUrl, downloadModel, decodeEntitiesV2, decodeEntities } from "./gliner-boundary.mjs";
+import { GlinerBoundaryRuntime, GLINER_MODELS, hfFileUrl, downloadModel, decodeEntitiesV2, decodeEntities, NATIVE_MAX_WORDS, LONG_CHUNK_SIZE, LONG_CHUNK_OVERLAP } from "./gliner-boundary.mjs";
 import { proposeRelationPairs, beamSearchRelations, zipRecords, collectLatticeMentions, attachAttributesFromLattice, decodeAssignedRecords } from "./joint-ie.mjs";
 import { decodeConstrained } from "./classify-constraints.mjs";
 
-export { GLINER_MODELS, hfFileUrl, downloadModel };
+export { GLINER_MODELS, hfFileUrl, downloadModel, NATIVE_MAX_WORDS, LONG_CHUNK_SIZE, LONG_CHUNK_OVERLAP };
 
 function toEntityMap(entities, { includeConfidence = false, includeSpans = false, asList = true } = {}) {
   const out = {};
@@ -85,7 +85,7 @@ export class Gliner25 {
     include_spans = false,
     descriptions,
     parent = "entities",
-    maxWords = 3800,
+    maxWords = NATIVE_MAX_WORDS,
   } = {}) {
     const entities = await this.rt.extract(text, labels, {
       threshold, descriptions, parent, maxWords,
@@ -233,6 +233,65 @@ export class Gliner25 {
       }
       return decodeConstrained(raw, { implies, excludes });
     }
+    return out;
+  }
+
+  /**
+   * Python classify_text_long: 384/64 word windows, keep the highest-confidence
+   * chunk per task. Constrained classify stays one-shot (constraints need the
+   * full label set in one beam).
+   */
+  async classify_text_long(text, taskOrMap, labelsMaybe, opts = {}) {
+    if (!this.hasClassifier) {
+      const err = new Error("classify_text needs a v3 graph (cls_logits). This session is entity-only.");
+      err.code = "GLINER_HEAD_MISSING";
+      err.head = "classification";
+      throw err;
+    }
+    const chunkSize = opts.chunk_size ?? opts.chunkSize ?? LONG_CHUNK_SIZE;
+    const chunkOverlap = opts.chunk_overlap ?? opts.chunkOverlap ?? LONG_CHUNK_OVERLAP;
+    let tasks;
+    if (typeof taskOrMap === "string") {
+      tasks = { [taskOrMap]: { labels: labelsMaybe } };
+    } else {
+      tasks = {};
+      for (const [name, spec] of Object.entries(taskOrMap)) {
+        tasks[name] = Array.isArray(spec) ? { labels: spec } : spec;
+      }
+    }
+    let anyConstraint = Boolean(opts.implies || opts.excludes);
+    for (const spec of Object.values(tasks)) {
+      if (spec.implies || spec.excludes) anyConstraint = true;
+    }
+    if (anyConstraint) {
+      const one = await this.classify_text(text, taskOrMap, labelsMaybe, opts);
+      return { ...one, _mode: "oneshot-constrained", _chunks: 1 };
+    }
+    const out = {};
+    let words = 0;
+    let nChunks = 1;
+    let mode = "oneshot";
+    for (const [name, spec] of Object.entries(tasks)) {
+      const labels = spec.labels || spec;
+      const multi = Boolean(spec.multi_label ?? spec.multiLabel);
+      const threshold = spec.threshold ?? opts.threshold ?? 0.5;
+      const classified = await this.rt.classifyLong(text, name, labels, {
+        threshold,
+        multiLabel: multi,
+        descriptions: spec.descriptions,
+        chunkSize,
+        chunkOverlap,
+      });
+      out[name] = classified;
+      if (!multi) {
+        words = classified._words ?? words;
+        nChunks = classified._chunks ?? nChunks;
+        mode = classified._mode || mode;
+      }
+    }
+    out._chunks = nChunks;
+    out._words = words;
+    out._mode = mode;
     return out;
   }
 

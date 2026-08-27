@@ -1,4 +1,4 @@
-import { softmax, cropWordStates, resolveOverlapsFlat } from "../src/gliner-boundary.mjs";
+import { softmax, cropWordStates, resolveOverlapsFlat, iterWordChunks, normalizeText } from "../src/gliner-boundary.mjs";
 
 const p = softmax([1, 2, 3]);
 const sum = p.reduce((a, b) => a + b, 0);
@@ -30,4 +30,12 @@ const polluted = resolveOverlapsFlat([
 if (polluted.length !== 1 || polluted[0].end !== 3) {
   throw new Error(`filtered overlap ${JSON.stringify(polluted)}`);
 }
+
+const padded = Array.from({ length: 800 }, (_, i) => `w${i}`).join(" ") + ".";
+const { words, chunks } = iterWordChunks(normalizeText(padded), { chunkSize: 384, chunkOverlap: 64 });
+if (words.length !== 801) throw new Error(`words ${words.length}`);
+if (chunks.length !== 3) throw new Error(`chunks ${chunks.length}`);
+if (chunks[0].wordStart !== 0 || chunks[0].wordEnd !== 384) throw new Error(`c0 ${JSON.stringify(chunks[0])}`);
+if (chunks[1].wordStart !== 320 || chunks[1].wordEnd !== 704) throw new Error(`c1 ${JSON.stringify(chunks[1])}`);
+if (chunks[2].wordStart !== 640 || chunks[2].wordEnd !== 801) throw new Error(`c2 ${JSON.stringify(chunks[2])}`);
 console.log("ok");

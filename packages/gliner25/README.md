@@ -45,7 +45,8 @@ await gliner.extract_relations(text, { works_for: { head: ["person"], tail: ["or
 |---|---|
 | `extract_entities` / `extract_entities_long` | v2+ |
 | `extract_json` (field-as-label) | v2+ |
-| `classify_text` | v3 |
+| `classify_text` | v3, one-shot up to 4096 words |
+| `classify_text_long` | v3, 384/64 word windows, max-confidence merge |
 | `extract_relations` (JointIE beam in JS) | v4 `heads.onnx` |
 | `extract_json(..., { records: true })` | v5 `candidate_states` + `records.onnx` |
 | `classify_text(..., { implies, excludes })` | v3 logits + JS beam |

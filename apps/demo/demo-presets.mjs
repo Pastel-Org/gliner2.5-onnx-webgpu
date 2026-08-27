@@ -33,7 +33,7 @@ export const GROUPS = [
   {
     id: "Classification",
     title: "Classification",
-    blurb: "v3 [C] head. Argmax over sigmoid(cls_logits).",
+    blurb: "v3 [C] head. One-shot up to 4096 words; classify_text_long is 384/64 max-confidence.",
   },
   {
     id: "PII",
@@ -48,7 +48,7 @@ export const GROUPS = [
   {
     id: "Long context",
     title: "Long documents",
-    blurb: "Host chunks overlapping word windows and remaps offsets.",
+    blurb: "Host chunks 384/64 word windows (Python defaults) and remaps offsets. One-shot encode is 4096 words.",
   },
   {
     id: "Attributes",
@@ -328,6 +328,18 @@ export const PRESETS = [
     excludes: { "sentiment:positive": ["sentiment:negative"] },
     text: "Cancel this order immediately. The device is defective and I want a refund today.",
     note: "JS beam over cls_logits with implies/excludes. urgent implies negative; positive excludes negative.",
+  },
+  {
+    id: "cls-long",
+    group: "Classification",
+    source: "long",
+    title: "Long contract",
+    view: "classify",
+    long: true,
+    task: "topic",
+    labels: "technology, business, legal, sports",
+    note: "classify_text_long: 384-word windows, overlap 64, keep the highest-confidence chunk.",
+    text: "MASTER SERVICES AGREEMENT between Helios Robotics OÜ (\"Provider\") and Northwind Data GmbH (\"Customer\"), effective 1 March 2026. Provider shall supply managed inference infrastructure, model-hosting capacity, and on-call incident response for Customer's document-processing workloads. Fees are fifteen thousand euros per month, invoiced in arrears, payable within fifteen days. The term is twenty-four months with automatic renewal for successive twelve-month periods unless either party gives ninety days written notice. Governing law is the law of Estonia. Disputes shall be resolved in the courts of Tallinn. Provider shall maintain professional indemnity insurance of not less than one million euros. Customer shall not reverse engineer hosted models. Confidential information excludes information that is public, independently developed, or required by law to be disclosed. Notices go to the registered offices. Neither party may assign this agreement without prior written consent, except to an affiliate. Force majeure covers war, flood, epidemic, and failure of public networks. If a clause is unenforceable the remainder survives. This agreement is the entire agreement and supersedes all prior proposals. Amendments must be in writing and signed. The parties have executed this agreement as of the date first written above. Schedule A lists the environments: production in Frankfurt, staging in Amsterdam, and a disaster-recovery replica in Stockholm. Schedule B lists the service levels: 99.9 percent monthly uptime, a fifteen-minute acknowledge target for severity-one incidents, and a four-hour restore target. Customer data remains Customer data. Provider processes it only on documented instructions. Subprocessors are named in Schedule C and may change on thirty days notice. Audit rights are once per year on reasonable notice. Upon termination Provider shall delete Customer data within thirty days unless law requires retention. The indemnification clause covers third-party intellectual-property claims arising from Provider software, except to the extent caused by Customer materials. Limitation of liability is twelve months of fees, excluding fraud, death, or personal injury. Liquidated damages for missed uptime are a service-credit schedule, not a penalty. Export-control warranties apply. The parties acknowledge they have had opportunity to take legal advice. Signatures follow on the next page. Additional operating clauses: change management requires a ticket, a rollback plan, and a maintenance window outside European business hours. Security reviews occur quarterly. Penetration tests are annual. Backup restoration is tested twice a year. On-call rotations are published a month in advance. Status pages shall not name Customer. Marketing references require written approval. Open-source notices ship with each release. Training data for fine-tunes is Customer's to license. Model cards stay with the artifacts. These operating clauses exist so the page must split the document into overlapping word windows rather than classifying a single short paragraph.",
   },
   {
     id: "pii",

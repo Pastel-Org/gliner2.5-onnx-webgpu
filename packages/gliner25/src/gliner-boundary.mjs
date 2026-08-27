@@ -39,6 +39,10 @@ export const GLINER_MODELS = {
   },
 };
 
+export const NATIVE_MAX_WORDS = 4096;
+export const LONG_CHUNK_SIZE = 384;
+export const LONG_CHUNK_OVERLAP = 64;
+
 /** HF resolve URL for a repo file (LFS-aware, CORS-enabled). */
 export function hfFileUrl(repo, file) {
   return `https://huggingface.co/${repo}/resolve/main/${file}`;
@@ -74,6 +78,42 @@ export function normalizeText(text) {
   if (!text) return ".";
   if (text.endsWith(".") || text.endsWith("!") || text.endsWith("?")) return text;
   return text + ".";
+}
+
+/**
+ * Word-aligned overlapping windows. Same layout as Python
+ * `split_text_into_chunks` (chunk_size 384, overlap 64, step 320).
+ */
+export function iterWordChunks(normalized, {
+  chunkSize = LONG_CHUNK_SIZE,
+  chunkOverlap = LONG_CHUNK_OVERLAP,
+  maxWords = NATIVE_MAX_WORDS,
+} = {}) {
+  const words = splitWords(normalized).slice(0, maxWords);
+  if (words.length === 0) return { words, chunks: [] };
+  const chunks = [];
+  if (words.length <= chunkSize) {
+    chunks.push({
+      text: normalized.slice(words[0].start, words[words.length - 1].end),
+      origin: words[0].start,
+      wordStart: 0,
+      wordEnd: words.length,
+    });
+    return { words, chunks };
+  }
+  for (let i = 0; i < words.length; ) {
+    const wordEnd = Math.min(i + chunkSize, words.length);
+    const slice = words.slice(i, wordEnd);
+    chunks.push({
+      text: normalized.slice(slice[0].start, slice[slice.length - 1].end),
+      origin: slice[0].start,
+      wordStart: i,
+      wordEnd,
+    });
+    if (wordEnd >= words.length) break;
+    i += Math.max(1, chunkSize - chunkOverlap);
+  }
+  return { words, chunks };
 }
 
 /**
@@ -389,7 +429,7 @@ export class GlinerBoundaryRuntime {
    * sweep thresholds without re-running inference).
    */
   async computeMarginals(text, labels, {
-    maxWords = 3800, parent = "entities", descriptions,
+    maxWords = NATIVE_MAX_WORDS, parent = "entities", descriptions,
     schemaKind = "entities", clsTask = "label", relations,
   } = {}) {
     const normalized = normalizeText(text);
@@ -500,7 +540,7 @@ export class GlinerBoundaryRuntime {
     };
   }
 
-  async classify(text, task, labels, { threshold = 0.5, multiLabel = false, descriptions } = {}) {
+  async classify(text, task, labels, { threshold = 0.5, multiLabel = false, descriptions, maxWords = NATIVE_MAX_WORDS } = {}) {
     if (!this.outputNames.has("cls_logits")) {
       const err = new Error("session has no cls_logits (need v3 export)");
       err.code = "GLINER_HEAD_MISSING";
@@ -510,6 +550,7 @@ export class GlinerBoundaryRuntime {
       schemaKind: "classification",
       clsTask: task,
       descriptions,
+      maxWords,
     });
     const scores = (marg.clsLogits || []).map((x) => sigmoid(x));
     if (multiLabel) {
@@ -720,7 +761,7 @@ export class GlinerBoundaryRuntime {
    * proxy decode.
    * @returns {Promise<Array<{label:string,text:string,start:number,end:number,score:number}>>}
    */
-  async extract(text, labels, { threshold = 0.5, maxWords = 3800, parent, descriptions } = {}) {
+  async extract(text, labels, { threshold = 0.5, maxWords = NATIVE_MAX_WORDS, parent, descriptions } = {}) {
     const marg = await this.computeMarginals(text, labels, { maxWords, parent, descriptions });
     if (!marg.startLogits) return [];
     if (marg.pairLogits) {
@@ -751,7 +792,7 @@ export class GlinerBoundaryRuntime {
    * Extract entities from a v2 graph explicitly. Throws if the session does
    * not expose pair outputs (use extract() for auto-detection).
    */
-  async extractV2(text, labels, { threshold = 0.5, maxWords = 3800, parent, descriptions } = {}) {
+  async extractV2(text, labels, { threshold = 0.5, maxWords = NATIVE_MAX_WORDS, parent, descriptions } = {}) {
     const marg = await this.computeMarginals(text, labels, { maxWords, parent, descriptions });
     if (!marg.pairLogits) {
       throw new Error("session is not a v2 export (no pair_logits output)");
@@ -776,37 +817,78 @@ export class GlinerBoundaryRuntime {
    */
   async extractLong(text, labels, {
     threshold = 0.5,
-    chunkSize = 384,
-    chunkOverlap = 64,
-    maxWords = 3800,
+    chunkSize = LONG_CHUNK_SIZE,
+    chunkOverlap = LONG_CHUNK_OVERLAP,
+    maxWords = NATIVE_MAX_WORDS,
     parent,
     descriptions,
   } = {}) {
     const normalized = normalizeText(text);
-    const words = splitWords(normalized).slice(0, maxWords);
-    if (words.length <= chunkSize) {
+    const { chunks } = iterWordChunks(normalized, { chunkSize, chunkOverlap, maxWords });
+    if (chunks.length <= 1) {
       return this.extract(normalized, labels, { threshold, maxWords, parent, descriptions });
     }
     const all = [];
-    for (let i = 0; i < words.length; ) {
-      const slice = words.slice(i, Math.min(i + chunkSize, words.length));
-      const origin = slice[0].start;
-      const chunk = normalized.slice(origin, slice[slice.length - 1].end);
-      const ents = await this.extract(chunk, labels, {
+    for (const ch of chunks) {
+      const ents = await this.extract(ch.text, labels, {
         threshold,
         maxWords: chunkSize + 8,
         parent,
         descriptions,
       });
       for (const e of ents) {
-        const start = e.start + origin;
-        const end = e.end + origin;
+        const start = e.start + ch.origin;
+        const end = e.end + ch.origin;
         all.push({ ...e, start, end, text: normalized.slice(start, end) });
       }
-      if (i + chunkSize >= words.length) break;
-      i += Math.max(1, chunkSize - chunkOverlap);
     }
     return mergeOverlappingByLabel(all);
+  }
+
+  /**
+   * classify_text_long: overlapping word chunks, keep the highest-confidence
+   * chunk result (Python merge of classification dicts).
+   */
+  async classifyLong(text, task, labels, {
+    threshold = 0.5,
+    multiLabel = false,
+    descriptions,
+    chunkSize = LONG_CHUNK_SIZE,
+    chunkOverlap = LONG_CHUNK_OVERLAP,
+    maxWords = NATIVE_MAX_WORDS,
+  } = {}) {
+    const normalized = normalizeText(text);
+    const { words, chunks } = iterWordChunks(normalized, { chunkSize, chunkOverlap, maxWords });
+    if (chunks.length <= 1) {
+      const one = await this.classify(normalized, task, labels, {
+        threshold, multiLabel, descriptions, maxWords,
+      });
+      if (multiLabel) return one;
+      return { ...one, _chunks: 1, _words: words.length, _mode: "oneshot" };
+    }
+    if (multiLabel) {
+      const byLabel = new Map();
+      for (const ch of chunks) {
+        const part = await this.classify(ch.text, task, labels, {
+          threshold, multiLabel: true, descriptions, maxWords: chunkSize + 8,
+        });
+        for (const item of part) {
+          const prev = byLabel.get(item.label);
+          if (!prev || item.score > prev.score) byLabel.set(item.label, item);
+        }
+      }
+      return [...byLabel.values()].filter((x) => x.score >= threshold);
+    }
+    let best = null;
+    for (const ch of chunks) {
+      const part = await this.classify(ch.text, task, labels, {
+        threshold, multiLabel: false, descriptions, maxWords: chunkSize + 8,
+      });
+      if (!best || part.score > best.score) {
+        best = { ...part, _chunkWordStart: ch.wordStart, _chunkWordEnd: ch.wordEnd };
+      }
+    }
+    return { ...best, _chunks: chunks.length, _words: words.length, _mode: "long" };
   }
 }
 

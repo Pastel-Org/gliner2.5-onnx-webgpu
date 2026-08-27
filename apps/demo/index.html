@@ -602,6 +602,7 @@
       const preset = activePreset;
 
       const gliner = await loadGliner(modelKey);
+      window.__gliner = gliner;
       const opts = {
         threshold,
         parent: preset?.parent,
@@ -612,13 +613,21 @@
       const t0 = performance.now();
       if (preset?.view === "classify") {
         let result;
+        const classifyOpts = {
+          threshold,
+          implies: preset.implies,
+          excludes: preset.excludes,
+          chunk_size: preset.chunkSize,
+          chunk_overlap: preset.chunkOverlap,
+        };
+        const runClassify = preset?.long
+          ? (t, tasks, labels) => gliner.classify_text_long(t, tasks, labels, classifyOpts)
+          : (t, tasks, labels) => gliner.classify_text(t, tasks, labels, classifyOpts);
         if (preset.tasks) {
-          result = await gliner.classify_text(text, preset.tasks, null, {
-            threshold, implies: preset.implies, excludes: preset.excludes,
-          });
+          result = await runClassify(text, preset.tasks, null);
         } else {
           const task = preset.task || "label";
-          result = await gliner.classify_text(text, task, labels, { threshold });
+          result = await runClassify(text, task, labels);
         }
         const dt = performance.now() - t0;
         const bits = Object.entries(result)
@@ -635,7 +644,8 @@
         el.extra.appendChild(pre);
         el.raw.textContent = JSON.stringify(result, null, 2);
         el.legend.innerHTML = "";
-        el.stats.innerHTML = `classify · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b>`;
+        const chunkBit = result._chunks > 1 ? ` · ${result._chunks} chunks · ${result._words} words` : "";
+        el.stats.innerHTML = `classify${chunkBit} · ${(dt / 1000).toFixed(2)} s · device: <b>${deviceLabel.value}</b>`;
         setStatus("Done.");
         return;
       }
