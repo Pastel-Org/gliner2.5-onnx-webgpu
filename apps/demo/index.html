@@ -111,6 +111,7 @@
   .workspace > .card { margin-bottom: 0; }
   .stage {
     min-width: 0;
+    position: relative;
     transition: box-shadow var(--pastel-duration-normal) var(--pastel-easing), background var(--pastel-duration-normal) var(--pastel-easing);
   }
   .now {
@@ -120,17 +121,35 @@
     margin: 0 0 var(--pastel-space-4);
     min-height: 1.2em;
   }
-  .stage.flash {
-    animation: stage-flash 520ms var(--pastel-easing);
+  /* Selection cue: a thin warm light-sweep under the card's top edge,
+     drawn once, then gone. Nothing fills, nothing glows. */
+  .stage.flash::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: var(--pastel-space-4);
+    right: var(--pastel-space-4);
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, transparent, var(--pastel-accent), var(--pastel-accent-bright), transparent);
+    transform-origin: left center;
+    animation: stage-sweep 640ms var(--pastel-easing) forwards;
   }
-  .stage.flash #text,
-  .stage.flash #labels {
-    border-color: var(--pastel-accent);
-    box-shadow: var(--pastel-shadow-glow);
+  @keyframes stage-sweep {
+    0% { opacity: 0; transform: scaleX(0); }
+    20% { opacity: .85; }
+    100% { opacity: 0; transform: scaleX(1); }
   }
-  @keyframes stage-flash {
-    0% { background: oklch(0.655 0.135 45 / 0.10); box-shadow: 0 0 0 3px oklch(0.655 0.135 45 / 0.28); }
-    100% { background: var(--pastel-surface); box-shadow: var(--pastel-shadow-sm); }
+  .now.flash {
+    animation: now-in 300ms var(--pastel-easing);
+  }
+  @keyframes now-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stage.flash::before { display: none; }
+    .now.flash { animation: none; }
   }
   .samples { display: flex; flex-direction: column; min-height: 0; }
   .ex-scroll {
@@ -381,8 +400,10 @@
     }
     if (flash && el.stage) {
       el.stage.classList.remove("flash");
+      el.now.classList.remove("flash");
       void el.stage.offsetWidth;
       el.stage.classList.add("flash");
+      el.now.classList.add("flash");
     }
   }
 
